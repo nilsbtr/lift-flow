@@ -1,0 +1,19 @@
+{
+    "debug.internalConsoleOptions": "openOnSessionStart",
+    "[dart]": {
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false,
+        "editor.tabSize": 2,
+        "editor.rulers": [80],
+        "editor.selectionHighlight": false,
+        "editor.tabCompletion": "onlySnippets",
+        "editor.wordBasedSuggestions": "off",
+        "editor.defaultFormatter": "Dart-Code.dart-code",
+    },
+    "explorer.fileNesting.enabled": true,
+    "files.exclude": {
+        ".dart_tool": true,
+        ".widget_preview": true,
+        ".idea": true
+    }
+}

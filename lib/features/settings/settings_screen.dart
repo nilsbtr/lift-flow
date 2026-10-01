@@ -1,0 +1,395 @@
+import 'package:drift/drift.dart' show Value;
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:material_ui/material_ui.dart';
+
+import '../../data/backup_service.dart';
+import '../../data/database.dart';
+import '../../domain/units.dart';
+import '../../providers.dart';
+import '../../theme/app_icons.dart';
+import '../../theme/app_theme.dart';
+import '../../theme/tokens.dart';
+import '../../widgets/bodyweight_dialog.dart';
+import '../../widgets/common.dart';
+
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen>
+    with WidgetsBindingObserver {
+  bool? _exact;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkExact();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkExact();
+  }
+
+  Future<void> _checkExact() async {
+    final v = await ref.read(notificationsProvider).canScheduleExact();
+    if (mounted) setState(() => _exact = v);
+  }
+
+  SettingsController get _ctrl => ref.read(settingsProvider.notifier);
+
+  Future<void> _editBodyweight(UserSettings s) async {
+    final kg = await askBodyweight(
+      context,
+      unit: s.weightUnit,
+      initialKg: s.bodyweightKg,
+    );
+    if (kg != null) await _ctrl.logBodyweight(kg);
+  }
+
+  Future<void> _export() async {
+    setState(() => _busy = true);
+    try {
+      final bytes = await ref.read(backupProvider).export();
+      final name =
+          'lift_flow_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.json';
+      final uri = await FilePicker.saveFile(
+        dialogTitle: 'Save backup',
+        fileName: name,
+        bytes: bytes,
+        mimeType: 'application/json',
+      );
+      if (mounted && uri != null) toast(context, 'Backup saved');
+    } catch (e) {
+      if (mounted) toast(context, 'Export failed');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _import() async {
+    final ok = await confirm(
+      context,
+      title: 'Import backup?',
+      message: 'This replaces all current data, including history.',
+      action: 'Choose file',
+      destructive: true,
+    );
+    if (!ok) return;
+    final file = await FilePicker.pickFile(dialogTitle: 'Choose backup');
+    if (file == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final size = file.lengthSync() ?? await file.length();
+      if (size != null && size > kMaxBackupBytes) {
+        throw const BackupFormatException('Backup file is too large.');
+      }
+      final bytes = await file.readAsBytes();
+      await ref.read(backupProvider).import(bytes);
+      await _afterReset();
+      if (mounted) toast(context, 'Backup imported');
+    } on BackupFormatException catch (e) {
+      if (mounted) toast(context, e.message);
+    } catch (e) {
+      if (mounted) toast(context, 'Import failed');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteAll() async {
+    final ok = await confirm(
+      context,
+      title: 'Delete all data?',
+      message:
+          'Exercises, templates, history and settings will be removed. '
+          'This can’t be undone.',
+      action: 'Delete everything',
+      destructive: true,
+    );
+    if (!ok) return;
+    await ref.read(backupProvider).deleteAll();
+    await _afterReset();
+    if (mounted) toast(context, 'All data deleted');
+  }
+
+  Future<void> _afterReset() async {
+    ref.read(restTimerProvider.notifier).skip();
+    await _ctrl.reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(settingsProvider);
+    final t = Theme.of(context).textTheme;
+    final muted = LiftColors.of(context).muted;
+    final darkActive =
+        s.themeMode == ThemePref.dark ||
+        (s.themeMode == ThemePref.system &&
+            MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: AbsorbPointer(
+        absorbing: _busy,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: Space.xxl),
+          children: [
+            const SectionLabel('Units & body'),
+            _SegmentTile<WeightUnit>(
+              title: 'Weight unit',
+              values: WeightUnit.values,
+              selected: s.weightUnit,
+              label: (v) => v.label,
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(weightUnit: Value(v))),
+            ),
+            ListTile(
+              title: const Text('Body weight'),
+              subtitle: const Text('Logged per day, charted in Progress'),
+              trailing: Text(
+                s.bodyweightKg == null
+                    ? 'Not set'
+                    : '${fmtWeight(s.bodyweightKg!, s.weightUnit)} ${s.weightUnit.label}',
+                style: t.bodyLarge?.copyWith(
+                  color: s.bodyweightKg == null ? muted : null,
+                  fontWeight: s.bodyweightKg == null ? null : FontWeight.w600,
+                ),
+              ),
+              onTap: () => _editBodyweight(s),
+            ),
+            const SectionLabel('Rest timer'),
+            ListTile(
+              title: const Text('Default rest'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Shorter',
+                    onPressed: s.defaultRestSeconds > 15
+                        ? () => _ctrl.update(
+                            AppSettingsCompanion(
+                              defaultRestSeconds: Value(
+                                s.defaultRestSeconds - 15,
+                              ),
+                            ),
+                          )
+                        : null,
+                    icon: const AppIcon(AppIcons.minus),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      fmtClock(s.defaultRestSeconds),
+                      textAlign: TextAlign.center,
+                      style: t.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Longer',
+                    onPressed: s.defaultRestSeconds < 600
+                        ? () => _ctrl.update(
+                            AppSettingsCompanion(
+                              defaultRestSeconds: Value(
+                                s.defaultRestSeconds + 15,
+                              ),
+                            ),
+                          )
+                        : null,
+                    icon: const AppIcon(AppIcons.plus),
+                  ),
+                ],
+              ),
+            ),
+            SwitchListTile(
+              title: const Text('Start rest after each set'),
+              value: s.autoStartRest,
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(autoStartRest: Value(v))),
+            ),
+            SwitchListTile(
+              title: const Text('Alert when rest is over'),
+              subtitle: const Text('Notification while the phone is locked'),
+              value: s.restAlerts,
+              onChanged: (v) async {
+                if (v) {
+                  await ref.read(notificationsProvider).requestPermission();
+                }
+                await _ctrl.update(AppSettingsCompanion(restAlerts: Value(v)));
+              },
+            ),
+            if (s.restAlerts && _exact == false)
+              ListTile(
+                title: const Text('Allow precise alerts'),
+                subtitle: const Text(
+                  'Without this, Android may deliver the alert a bit late.',
+                ),
+                trailing: const AppIcon(AppIcons.openExternal),
+                onTap: () =>
+                    ref.read(notificationsProvider).requestExactAlarms(),
+              ),
+            const SectionLabel('Workout'),
+            ListTile(
+              title: const Text('Weekly goal'),
+              subtitle: const Text('Workouts per week'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Fewer',
+                    onPressed: s.weeklyGoal == null
+                        ? null
+                        : () => _ctrl.setWeeklyGoal(
+                            s.weeklyGoal == 1 ? null : s.weeklyGoal! - 1,
+                          ),
+                    icon: const AppIcon(AppIcons.minus),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      s.weeklyGoal?.toString() ?? 'Off',
+                      textAlign: TextAlign.center,
+                      style: t.titleMedium?.copyWith(
+                        color: s.weeklyGoal == null ? muted : null,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'More',
+                    onPressed: (s.weeklyGoal ?? 0) < 7
+                        ? () => _ctrl.setWeeklyGoal((s.weeklyGoal ?? 0) + 1)
+                        : null,
+                    icon: const AppIcon(AppIcons.plus),
+                  ),
+                ],
+              ),
+            ),
+            SwitchListTile(
+              title: const Text('Keep screen on'),
+              subtitle: const Text('While a workout is running'),
+              value: s.keepScreenOn,
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(keepScreenOn: Value(v))),
+            ),
+            const SectionLabel('Appearance'),
+            _SegmentTile<ThemePref>(
+              title: 'Theme',
+              values: ThemePref.values,
+              selected: s.themeMode,
+              label: (v) => v.label,
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(themeMode: Value(v))),
+            ),
+            SwitchListTile(
+              title: const Text('Pure black'),
+              subtitle: const Text('Dark theme on a black background'),
+              value: s.pureBlack,
+              onChanged: darkActive
+                  ? (v) =>
+                        _ctrl.update(AppSettingsCompanion(pureBlack: Value(v)))
+                  : null,
+            ),
+            const SectionLabel('Data'),
+            ListTile(
+              leading: const AppIcon(AppIcons.exportFile),
+              title: const Text('Export backup'),
+              subtitle: const Text('Save all data as a JSON file'),
+              onTap: _export,
+            ),
+            ListTile(
+              leading: const AppIcon(AppIcons.importFile),
+              title: const Text('Import backup'),
+              subtitle: const Text('Replace all data from a file'),
+              onTap: _import,
+            ),
+            ListTile(
+              leading: AppIcon(
+                AppIcons.trash,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'Delete all data',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              onTap: _deleteAll,
+            ),
+            const SectionLabel('About'),
+            ListTile(
+              title: const Text('Licenses'),
+              onTap: () => showLicensePage(
+                context: context,
+                applicationName: 'Lift Flow',
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(Space.lg),
+              child: Text(
+                'All data stays on this device.',
+                style: t.bodySmall?.copyWith(color: muted),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentTile<T> extends StatelessWidget {
+  const _SegmentTile({
+    required this.title,
+    required this.values,
+    required this.selected,
+    required this.label,
+    required this.onChanged,
+  });
+
+  final String title;
+  final List<T> values;
+  final T selected;
+  final String Function(T) label;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.lg,
+        vertical: Space.sm,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ),
+          SegmentedButton<T>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              minimumSize: WidgetStatePropertyAll(Size(0, kCompactTap)),
+            ),
+            segments: [
+              for (final v in values)
+                ButtonSegment(value: v, label: Text(label(v))),
+            ],
+            selected: {selected},
+            onSelectionChanged: (s) => onChanged(s.first),
+          ),
+        ],
+      ),
+    );
+  }
+}
