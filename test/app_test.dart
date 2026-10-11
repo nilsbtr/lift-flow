@@ -1740,6 +1740,23 @@ void main() {
       );
     });
 
+    test('import keeps this device’s app lock, delete-all resets it', () async {
+      final settings = SettingsRepository(db);
+      final backup = BackupService(db);
+      final bytes = await backup.export();
+      expect(parseBackup(bytes).settings.appLock.present, isFalse);
+
+      for (final lock in [true, false]) {
+        await settings.write(AppSettingsCompanion(appLock: Value(lock)));
+        await backup.import(bytes);
+        expect((await settings.get()).appLock, lock);
+      }
+
+      await settings.write(const AppSettingsCompanion(appLock: Value(true)));
+      await backup.deleteAll();
+      expect((await settings.get()).appLock, isFalse);
+    });
+
     test('v2 backup imports with defaults, warm-ups and remapped groups', () async {
       Map<String, Object?> exercise(int id, String name, String group) => {
         'id': id,

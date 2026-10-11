@@ -8,6 +8,7 @@ import '../../data/backup_service.dart';
 import '../../data/database.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
+import '../../services/app_lock.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
@@ -73,6 +74,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       AppSettingsCompanion(
         balanceMin: Value(band.$1),
         balanceMax: Value(band.$2),
+      ),
+    );
+  }
+
+  Future<void> _setAppLock(bool on) async {
+    final result = await ref.read(appLockProvider.notifier).setEnabled(on);
+    if (!mounted || result != AuthResult.unavailable) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Set a screen lock first'),
+        content: const Text(
+          'App lock unlocks with your phone’s fingerprint, PIN, pattern or '
+          'password. Set one up in your phone’s settings, then try again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -367,6 +389,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 style: t.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
               ),
               onTap: () => _editBalanceBand(s),
+            ),
+            const SectionLabel('Privacy'),
+            SwitchListTile(
+              title: const Text('App lock'),
+              subtitle: const Text('Unlock with your fingerprint or screen lock'),
+              value: s.appLock,
+              onChanged: _setAppLock,
             ),
             const SectionLabel('Data'),
             ListTile(

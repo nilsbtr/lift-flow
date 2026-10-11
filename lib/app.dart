@@ -5,8 +5,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'data/database.dart';
+import 'features/lock/lock_gate.dart';
 import 'providers.dart';
 import 'router.dart';
+import 'services/app_lock.dart';
 import 'services/notifications.dart';
 import 'theme/app_theme.dart';
 
@@ -31,7 +33,9 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     _taps = notifications.taps.listen((payload) {
       if (payload == NotificationService.payloadWorkout &&
           ref.read(liveWorkoutProvider) != null) {
-        ref.read(routerProvider).go('/workout');
+        ref
+            .read(appLockProvider.notifier)
+            .whenUnlocked(() => ref.read(routerProvider).go('/workout'));
       }
     });
     _restChanges = notifications.restChanges.listen(
@@ -39,9 +43,16 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     );
     // Notifications of a killed process outlive it.
     unawaited(notifications.clear());
+
+    ref.listenManual(
+      settingsProvider.select((s) => s.appLock),
+      (_, on) => unawaited(setRecentsHidden(on)),
+      fireImmediately: true,
+    );
   }
 
   void _onHide() {
+    ref.read(appLockProvider.notifier).onHidden();
     final live = ref.read(liveWorkoutProvider);
     if (live == null) return;
     final notifications = ref.read(notificationsProvider);
@@ -59,6 +70,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
 
   /// A notification action may have changed the rest while the app was hidden.
   void _onShow() {
+    ref.read(appLockProvider.notifier).onShown();
     unawaited(ref.read(notificationsProvider).clear());
     unawaited(ref.read(restTimerProvider.notifier).reload());
   }
@@ -95,6 +107,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
         ThemePref.dark => ThemeMode.dark,
       },
       routerConfig: router,
+      builder: (_, child) => AppLockGate(child: child!),
     );
   }
 }

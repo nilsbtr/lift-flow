@@ -49,6 +49,7 @@ abstract final class AppIcons {
   static const note = AppIconData('note');
   static const warning = AppIconData('warning');
   static const info = AppIconData('info');
+  static const lock = AppIconData('lock');
   static const exportFile = AppIconData('export_file');
   static const importFile = AppIconData('import_file');
   static const openExternal = AppIconData('open_external');
