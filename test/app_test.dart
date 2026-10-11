@@ -14,8 +14,10 @@ import 'package:lift_flow/data/template_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/muscles.dart';
 import 'package:lift_flow/domain/records.dart';
+import 'package:lift_flow/domain/rest.dart';
 import 'package:lift_flow/domain/units.dart';
 import 'package:lift_flow/providers.dart';
+import 'package:lift_flow/services/notifications.dart';
 import 'package:lift_flow/widgets/common.dart';
 
 void main() {
@@ -132,6 +134,32 @@ void main() {
       ['W', '1', '2', '3', '4'],
     );
     expect([for (final t in SetType.values) t.letter], ['', 'W', 'D', 'F', 'A']);
+  });
+
+  group('adjustRest', () {
+    final now = DateTime(2025, 1, 1, 12);
+    DateTime at(int seconds) => now.add(Duration(seconds: seconds));
+
+    test('moves the end and the total', () {
+      final r = adjustRest(at(40), 60, 30, now)!;
+      expect(r.endsAt, at(70));
+      expect(r.totalSeconds, 90);
+    });
+
+    test('is over when nothing is left', () {
+      expect(adjustRest(at(10), 60, -15, now), isNull);
+      expect(adjustRest(at(15), 60, -15, now), isNull);
+    });
+
+    test('keeps the total at or above the time left', () {
+      expect(adjustRest(at(60), 60, -15, now)!.totalSeconds, 60);
+    });
+
+    test('caps the end at an hour', () {
+      final r = adjustRest(at(3590), 3600, 30, now)!;
+      expect(r.endsAt, at(kMaxRestSeconds));
+      expect(r.totalSeconds, kMaxRestSeconds);
+    });
   });
 
   group('database', () {
@@ -926,6 +954,67 @@ void main() {
         await container.read(workoutPrsProvider(second).future),
         {exId: lift.prs},
       );
+    });
+
+    test('rest actions update the persisted rest', () async {
+      final repo = RestRepository(db);
+      final now = DateTime(2025, 1, 1, 12);
+      await repo.save(now.add(const Duration(seconds: 40)), 60);
+
+      final next = await applyRestAction(
+        repo,
+        NotificationService.actionAdd,
+        now: now,
+      );
+      expect(next?.endsAt, now.add(const Duration(seconds: 70)));
+      final row = (await repo.get())!;
+      expect(row.endsAt, next!.endsAt);
+      expect(row.totalSeconds, 90);
+
+      final skipped = await applyRestAction(
+        repo,
+        NotificationService.actionSkip,
+        now: now,
+      );
+      expect(skipped, isNull);
+      expect(await repo.get(), isNull);
+    });
+
+    test('a finished rest is not revived by +30 s', () async {
+      final repo = RestRepository(db);
+      final now = DateTime(2025, 1, 1, 12);
+      await repo.save(now.subtract(const Duration(seconds: 5)), 60);
+      final next = await applyRestAction(
+        repo,
+        NotificationService.actionAdd,
+        now: now,
+      );
+      expect(next, isNull);
+      expect(await repo.get(), isNull);
+    });
+
+    test('rest timer reloads what a notification action changed', () async {
+      final repo = RestRepository(db);
+      await repo.save(DateTime.now().add(const Duration(seconds: 60)), 60);
+      final container = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          initialRestProvider.overrideWithValue(await repo.get()),
+        ],
+      );
+      addTearDown(container.dispose);
+      final ctrl = container.read(restTimerProvider.notifier);
+      final before = container.read(restTimerProvider)!;
+
+      await applyRestAction(repo, NotificationService.actionAdd);
+      await ctrl.reload();
+      final after = container.read(restTimerProvider)!;
+      expect(after.endsAt.difference(before.endsAt).inSeconds, 30);
+      expect(after.totalSeconds, 90);
+
+      await applyRestAction(repo, NotificationService.actionSkip);
+      await ctrl.reload();
+      expect(container.read(restTimerProvider), isNull);
     });
   });
 }
