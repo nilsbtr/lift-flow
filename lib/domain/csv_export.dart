@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../data/database.dart';
-import '../data/enums.dart';
 import 'units.dart';
 
 /// Everything [setsCsv] needs, plain data so it can cross to an isolate.
