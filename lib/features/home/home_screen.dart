@@ -7,7 +7,7 @@ import '../../data/database.dart';
 import '../../data/template_repository.dart';
 import '../../domain/history.dart';
 import '../../domain/stats.dart';
-import '../../domain/superset_groups.dart';
+import '../../domain/supersets.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';

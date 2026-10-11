@@ -1,6 +1,6 @@
 import 'package:drift/drift.dart';
 
-import '../domain/superset_groups.dart';
+import '../domain/supersets.dart';
 import 'database.dart';
 
 class TemplateItem {
