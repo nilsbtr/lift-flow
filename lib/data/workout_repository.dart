@@ -1,7 +1,9 @@
 import 'package:drift/drift.dart';
 
 import '../domain/exercise_search.dart';
+import '../domain/finish.dart';
 import '../domain/records.dart';
+import '../domain/workout_name.dart';
 import 'database.dart';
 import 'template_repository.dart';
 
@@ -261,7 +263,7 @@ class WorkoutRepository {
     final live = await getLive();
     if (live != null) throw LiveWorkoutExistsException(live.id);
 
-    var title = name ?? 'Workout';
+    var title = name ?? kDefaultWorkoutName;
     var planned = items ?? const <TemplateItem>[];
     if (items == null && templateId != null) {
       final tpl = await TemplateRepository(_db).get(templateId);
@@ -481,10 +483,15 @@ class WorkoutRepository {
   /// body weight and writes the summary from working sets. Keeps an existing
   /// [Workout.endedAt] when editing a past workout. Returns false if no set
   /// was completed (the workout is deleted in that case).
+  ///
+  /// [endedAt] ends the workout then instead of now, kept between its start and
+  /// now. [name] replaces the workout's name.
   Future<bool> finish(
     int workoutId, {
     required double? bodyweightKg,
     bool keepEndedAt = false,
+    DateTime? endedAt,
+    String? name,
   }) => _db.transaction(() async {
     final loaded = await load(workoutId);
     if (loaded == null) return false;
@@ -541,11 +548,21 @@ class WorkoutRepository {
       return false;
     }
 
+    final now = DateTime.now();
+    final keep =
+        endedAt == null && keepEndedAt && loaded.workout.endedAt != null;
     await (_db.update(_w)..where((w) => w.id.equals(workoutId))).write(
       WorkoutsCompanion(
-        endedAt: keepEndedAt && loaded.workout.endedAt != null
+        endedAt: keep
             ? const Value.absent()
-            : Value(DateTime.now()),
+            : Value(
+                endWithin(
+                  endedAt ?? now,
+                  start: loaded.workout.startedAt,
+                  now: now,
+                ),
+              ),
+        name: name == null ? const Value.absent() : Value(name.trim()),
         bodyweightKg: Value(bodyweightKg),
         totalSets: Value(totalSets),
         totalVolumeKg: Value(volume),

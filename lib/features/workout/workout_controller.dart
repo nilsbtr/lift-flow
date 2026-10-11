@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/misc.dart' show KeepAliveLink;
 import '../../data/database.dart';
 import '../../data/workout_repository.dart';
 import '../../domain/records.dart';
+import '../../domain/workout_name.dart';
 import '../../providers.dart';
 
 @immutable
@@ -114,6 +115,24 @@ class DraftExercise {
         if (k.isNotEmpty) sets[i].id: k,
     };
   }
+
+  /// What ✓ stores for the set at [index]: empty fields take their hints.
+  /// Anything but [CompleteResult.ok] means there is nothing to fill in.
+  /// Keep in step with [WorkoutEditor.toggleDone].
+  ({CompleteResult result, double? load, int? reps}) completion(int index) {
+    final s = sets[index];
+    final hint = hintFor(index);
+    final reps = s.reps ?? hint.reps;
+    double? load = hasLoad ? (s.loadKg ?? hint.load) : null;
+    if (reps == null || reps <= 0) {
+      return (result: CompleteResult.needsReps, load: null, reps: null);
+    }
+    if (type == TrackingType.weights && load == null) {
+      return (result: CompleteResult.needsWeight, load: null, reps: reps);
+    }
+    if (type == TrackingType.bodyweight && mode != LoadMode.none) load ??= 0;
+    return (result: CompleteResult.ok, load: load, reps: reps);
+  }
 }
 
 enum SetField { load, reps }
@@ -155,6 +174,60 @@ class WorkoutDraft {
   );
 
   int get totalSets => exercises.fold(0, (n, e) => n + e.sets.length);
+
+  int get uncheckedSets => exercises.fold(
+    0,
+    (n, e) => n + e.sets.where((s) => !s.isCompleted).length,
+  );
+
+  /// Unchecked sets that mark all done can complete.
+  int get markableSets {
+    var n = 0;
+    for (final e in exercises) {
+      for (var i = 0; i < e.sets.length; i++) {
+        if (!e.sets[i].isCompleted &&
+            e.completion(i).result == CompleteResult.ok) {
+          n++;
+        }
+      }
+    }
+    return n;
+  }
+
+  /// The exercise with the most recently completed set, and when that was.
+  ({DraftExercise exercise, DateTime at})? get _lastCompleted {
+    ({DraftExercise exercise, DateTime at})? last;
+    for (final e in exercises) {
+      for (final s in e.sets) {
+        if (s.completedAt case final at?
+            when s.isCompleted && (last == null || at.isAfter(last.at))) {
+          last = (exercise: e, at: at);
+        }
+      }
+    }
+    return last;
+  }
+
+  /// When the last set was completed. Null if none has a time.
+  DateTime? get lastSetAt => _lastCompleted?.at;
+
+  /// Rest to start by hand: that of the exercise completed last, else
+  /// [fallback].
+  int restAfterLast(int fallback) =>
+      _lastCompleted?.exercise.restSeconds ?? fallback;
+
+  /// A name from the muscles trained, while the workout still has the default.
+  String? get suggestedName {
+    if (workout.name != kDefaultWorkoutName) return null;
+    final sets = <MuscleGroup, int>{};
+    for (final e in exercises) {
+      final n = e.sets
+          .where((s) => s.isCompleted && !s.setType.isWarmup)
+          .length;
+      sets.update(e.exercise.muscleGroup, (v) => v + n, ifAbsent: () => n);
+    }
+    return suggestWorkoutName(sets);
+  }
 
   DraftExercise? byId(int id) {
     for (final e in exercises) {
@@ -545,9 +618,49 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     await _repo.writeSets(batch);
   }
 
-  /// Finishes a live workout or saves edits of a past one.
+  /// Starts or restarts rest by hand with the time of the exercise completed
+  /// last, else the default.
+  void startRest() {
+    if (!_draft.isLive) return;
+    final fallback = ref.read(settingsProvider).defaultRestSeconds;
+    ref.read(restTimerProvider.notifier).start(_draft.restAfterLast(fallback));
+  }
+
+  /// Completes every unchecked set the way ✓ does, filling empty fields from
+  /// hints. Sets with no reps or weight to use stay unchecked and are counted
+  /// in `skipped`. Marked sets get no time, and no rest starts.
+  ({int marked, int skipped}) markAllDone() {
+    var marked = 0;
+    var skipped = 0;
+    for (final id in [for (final e in _draft.exercises) e.id]) {
+      for (var i = 0; i < _draft.byId(id)!.sets.length; i++) {
+        final ex = _draft.byId(id)!;
+        final s = ex.sets[i];
+        if (s.isCompleted) continue;
+        final c = ex.completion(i);
+        if (c.result != CompleteResult.ok) {
+          skipped++;
+          continue;
+        }
+        final u = s.copyWith(
+          loadKg: Value(c.load),
+          reps: Value(c.reps),
+          isCompleted: true,
+        );
+        _replaceSet(id, u);
+        _dirty[u.id] = u;
+        marked++;
+      }
+    }
+    flush();
+    return (marked: marked, skipped: skipped);
+  }
+
+  /// Finishes a live workout or saves edits of a past one. A live one ends at
+  /// [endedAt] instead of now, and a default name becomes
+  /// [WorkoutDraft.suggestedName].
   /// Returns false if nothing was logged (the workout is removed).
-  Future<bool> finish() async {
+  Future<bool> finish({DateTime? endedAt}) async {
     _debounce?.cancel();
     await commitDelete();
     await _writeDirty();
@@ -559,6 +672,8 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       workoutId,
       bodyweightKg: bodyweight,
       keepEndedAt: !d.isLive,
+      endedAt: d.isLive ? endedAt : null,
+      name: d.isLive ? d.suggestedName : null,
     );
     if (d.isLive) ref.read(restTimerProvider.notifier).skip();
     _release();

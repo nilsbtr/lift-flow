@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/enums.dart';
+import '../../domain/finish.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../router.dart';
@@ -14,6 +17,7 @@ import '../../widgets/periodic_builder.dart';
 import '../gym/exercise_editor_sheet.dart';
 import '../gym/exercise_picker_sheet.dart';
 import '../history/workout_times_field.dart';
+import 'finish_dialogs.dart';
 import 'finish_summary_sheet.dart';
 import 'rest_bar.dart';
 import 'set_menu_sheet.dart';
@@ -30,6 +34,41 @@ class LiveWorkoutRoute extends ConsumerStatefulWidget {
 
 class _LiveWorkoutRouteState extends ConsumerState<LiveWorkoutRoute> {
   int? _id;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_askIfForgotten()),
+    );
+  }
+
+  /// Once per app session, asks about a workout that has run for hours.
+  Future<void> _askIfForgotten() async {
+    final id = _id;
+    final live = ref.read(liveWorkoutProvider);
+    final asked = ref.read(forgottenAskedProvider);
+    if (!mounted || id == null || live?.id != id || asked.contains(id)) return;
+    if (!looksForgotten(live!.startedAt, DateTime.now())) return;
+    asked.add(id);
+    final draft = await ref.read(workoutEditorProvider(id).future);
+    final lastSet = draft.lastSetAt;
+    if (!mounted || (draft.completedSets > 0 && lastSet == null)) return;
+    final choice = await askForgotten(
+      context,
+      running: DateTime.now().difference(live.startedAt),
+      lastSetAt: lastSet,
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case ForgottenChoice.endAtLastSet:
+        await _finishAndSummarize(context, ref, id, endedAt: lastSet);
+      case ForgottenChoice.discard:
+        await ref.read(workoutEditorProvider(id).notifier).discard();
+        if (mounted) context.go('/');
+      case ForgottenChoice.keepGoing || null:
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +118,7 @@ class WorkoutScreen extends ConsumerWidget {
         titleSpacing: 0,
         title: _Title(workoutId: workoutId),
         actions: [
+          if (live) _RestButton(workoutId: workoutId),
           FilledButton(
             onPressed: () => _finish(context, ref),
             style: FilledButton.styleFrom(
@@ -208,7 +248,6 @@ class WorkoutScreen extends ConsumerWidget {
     final editor = ref.read(workoutEditorProvider(workoutId).notifier);
     final draft = ref.read(workoutEditorProvider(workoutId)).requireValue;
     final completed = draft.completedSets;
-    final total = draft.exercises.fold(0, (n, e) => n + e.sets.length);
 
     if (!draft.isLive) {
       if (completed == 0) {
@@ -220,7 +259,7 @@ class WorkoutScreen extends ConsumerWidget {
       return;
     }
 
-    if (completed == 0) {
+    if (completed == 0 && draft.markableSets == 0) {
       final ok = await confirm(
         context,
         title: 'Nothing logged yet',
@@ -234,25 +273,62 @@ class WorkoutScreen extends ConsumerWidget {
       return;
     }
 
-    final unchecked = total - completed;
-    final ok = await confirm(
-      context,
-      title: 'Finish workout?',
-      message: unchecked > 0
-          ? '$unchecked unchecked ${unchecked == 1 ? 'set' : 'sets'} will be dropped.'
-          : null,
-      action: 'Finish',
+    if (!await showFinishDialog(context, workoutId) || !context.mounted) return;
+    final latest = ref.read(workoutEditorProvider(workoutId)).requireValue;
+    final now = DateTime.now();
+    final started = latest.workout.startedAt;
+    final lastSet = staleEnd(latest.lastSetAt, startedAt: started, now: now);
+    DateTime? endedAt;
+    if (lastSet != null) {
+      final choice = await askEndTime(
+        context,
+        startedAt: started,
+        lastSetAt: lastSet,
+        now: now,
+      );
+      if (choice == null || !context.mounted) return;
+      if (choice == EndChoice.lastSet) endedAt = lastSet;
+    }
+    await _finishAndSummarize(context, ref, workoutId, endedAt: endedAt);
+  }
+}
+
+/// Finishes the live workout, goes home and shows its summary.
+Future<void> _finishAndSummarize(
+  BuildContext context,
+  WidgetRef ref,
+  int workoutId, {
+  DateTime? endedAt,
+}) async {
+  final saved = await ref
+      .read(workoutEditorProvider(workoutId).notifier)
+      .finish(endedAt: endedAt);
+  if (!context.mounted) return;
+  context.go('/');
+  if (!saved) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final root = rootNavigatorKey.currentContext;
+    if (root == null) return;
+    showAppSheet<void>(root, (_) => FinishSummarySheet(workoutId: workoutId));
+  });
+}
+
+class _RestButton extends ConsumerWidget {
+  const _RestButton({required this.workoutId});
+  final int workoutId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final running = ref.watch(restTimerProvider.select((r) => r != null));
+    return IconButton(
+      tooltip: running ? 'Restart rest timer' : 'Start rest timer',
+      icon: AppIcon(
+        AppIcons.timer,
+        color: running ? LiftColors.of(context).rest : null,
+      ),
+      onPressed: () =>
+          ref.read(workoutEditorProvider(workoutId).notifier).startRest(),
     );
-    if (!ok) return;
-    final saved = await editor.finish();
-    if (!context.mounted) return;
-    context.go('/');
-    if (!saved) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final root = rootNavigatorKey.currentContext;
-      if (root == null) return;
-      showAppSheet<void>(root, (_) => FinishSummarySheet(workoutId: workoutId));
-    });
   }
 }
 
