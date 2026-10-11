@@ -144,7 +144,9 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
             spacing: Space.sm,
             runSpacing: Space.sm,
             children: [
-              for (final g in MuscleGroup.values)
+              for (final g in MuscleGroup.selectableWith([
+                ?widget.existing?.muscleGroup,
+              ]))
                 ChoiceChip(
                   label: Text(g.label),
                   selected: _group == g,

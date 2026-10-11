@@ -180,7 +180,7 @@ class WorkoutRepository {
       filter &
           _w.endedAt.isNotNull() &
           _s.isCompleted &
-          _s.isWarmup.not(),
+          _s.setType.equalsValue(SetType.warmup).not(),
     );
   }
 
@@ -198,6 +198,9 @@ class WorkoutRepository {
       reps: s.reps,
       bodyweightKg: w.bodyweightKg,
       muscleGroup: e.muscleGroup,
+      secondaryMuscles: e.secondaryMuscles,
+      perSide: e.perSide,
+      perDumbbell: e.perDumbbell,
     );
   }
 
@@ -253,6 +256,9 @@ class WorkoutRepository {
               position: i,
               targetRepsMin: Value(it.repsMin),
               targetRepsMax: Value(it.repsMax),
+              restSeconds: Value(it.restSeconds),
+              targetWeightKg: Value(it.targetWeightKg),
+              supersetGroup: Value(it.supersetGroup),
             ),
           );
       // Warm-ups mirror the last session so prefilled values line up.
@@ -268,7 +274,11 @@ class WorkoutRepository {
             WorkoutSetsCompanion.insert(
               workoutExerciseId: weId,
               position: p,
-              isWarmup: Value(p < prev.length && prev[p].isWarmup),
+              setType: Value(
+                p < prev.length && prev[p].setType.isWarmup
+                    ? SetType.warmup
+                    : SetType.normal,
+              ),
             ),
           );
         }
@@ -311,6 +321,14 @@ class WorkoutRepository {
   Future<void> removeExercise(int workoutExerciseId) =>
       (_db.delete(_we)..where((w) => w.id.equals(workoutExerciseId))).go();
 
+  /// Writes exercise-level fields (note, rest, target weight, superset).
+  Future<void> updateExercise(
+    int workoutExerciseId,
+    WorkoutExercisesCompanion changes,
+  ) => (_db.update(
+    _we,
+  )..where((w) => w.id.equals(workoutExerciseId))).write(changes);
+
   Future<void> reorderExercises(List<int> workoutExerciseIds) => _db.batch((b) {
     for (var i = 0; i < workoutExerciseIds.length; i++) {
       b.update(
@@ -326,6 +344,7 @@ class WorkoutRepository {
     required int position,
     double? loadKg,
     int? reps,
+    SetType setType = SetType.normal,
   }) => _db
       .into(_s)
       .insertReturning(
@@ -334,6 +353,7 @@ class WorkoutRepository {
           position: position,
           loadKg: Value(loadKg),
           reps: Value(reps),
+          setType: Value(setType),
         ),
       );
 
@@ -350,7 +370,11 @@ class WorkoutRepository {
           reps: Value(s.reps),
           isCompleted: Value(s.isCompleted),
           completedAt: Value(s.completedAt),
-          isWarmup: Value(s.isWarmup),
+          setType: Value(s.setType),
+          rpe: Value(s.rpe),
+          note: Value(s.note),
+          durationSeconds: Value(s.durationSeconds),
+          distanceM: Value(s.distanceM),
         ),
         where: (t) => t.id.equals(s.id),
       );
@@ -361,6 +385,13 @@ class WorkoutRepository {
       (_db.update(_w)..where((w) => w.id.equals(workoutId))).write(
         WorkoutsCompanion(name: Value(name.trim())),
       );
+
+  Future<void> setNote(int workoutId, String? note) {
+    final n = note?.trim();
+    return (_db.update(_w)..where((w) => w.id.equals(workoutId))).write(
+      WorkoutsCompanion(note: Value(n == null || n.isEmpty ? null : n)),
+    );
+  }
 
   Future<void> discard(int workoutId) =>
       (_db.delete(_w)..where((w) => w.id.equals(workoutId))).go();
@@ -411,13 +442,15 @@ class WorkoutRepository {
       exerciseCount++;
       completed += kept.length;
       for (final s in kept) {
-        if (s.isWarmup) continue;
+        if (s.setType.isWarmup) continue;
         totalSets++;
         volume += setVolume(
           type: ex.exercise.trackingType,
           loadKg: s.loadKg,
           reps: s.reps,
           bodyweightKg: bodyweightKg,
+          perSide: ex.exercise.perSide,
+          perDumbbell: ex.exercise.perDumbbell,
         );
       }
     }

@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
 import '../../data/template_repository.dart';
+import '../../domain/stats.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
@@ -45,7 +46,12 @@ class HomeScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: Space.xxl),
         children: [
-          _WeekStrip(history: history),
+          _WeekStrip(
+            history: history,
+            firstDay: ref.watch(
+              settingsProvider.select((s) => s.firstDayOfWeek),
+            ),
+          ),
           const _WeekCaption(),
           const Padding(
             padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
@@ -169,24 +175,27 @@ class _StartButton extends ConsumerWidget {
 }
 
 class _WeekStrip extends StatelessWidget {
-  const _WeekStrip({required this.history});
+  const _WeekStrip({required this.history, required this.firstDay});
   final List<Workout> history;
+
+  /// [DateTime.monday] … [DateTime.sunday].
+  final int firstDay;
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final monday = today.subtract(Duration(days: today.weekday - 1));
+    final today = dayOf(DateTime.now());
+    final first = weekStart(today, firstDay);
+    final days = [for (var i = 0; i < 7; i++) addDays(first, i)];
     final trained = <int>{};
     for (final w in history) {
-      final d = w.startedAt;
-      final day = DateTime(d.year, d.month, d.day);
-      if (day.isBefore(monday)) break;
-      trained.add(day.difference(monday).inDays);
+      final day = dayOf(w.startedAt);
+      if (day.isBefore(first)) break;
+      trained.add(days.indexOf(day));
     }
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
     final scheme = Theme.of(context).colorScheme;
+    // By weekday, Monday first.
     const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
     return Padding(
@@ -201,7 +210,7 @@ class _WeekStrip extends StatelessWidget {
                   child: Column(
                     children: [
                       Text(
-                        letters[i],
+                        letters[days[i].weekday - 1],
                         style: t.labelSmall?.copyWith(color: lift.muted),
                       ),
                       const SizedBox(height: Space.xs),
@@ -215,18 +224,18 @@ class _WeekStrip extends StatelessWidget {
                               ? lift.done
                               : Colors.transparent,
                           border: Border.all(
-                            color: monday.add(Duration(days: i)) == today
+                            color: days[i] == today
                                 ? scheme.primary
                                 : trained.contains(i)
                                 ? lift.done
                                 : scheme.outline,
-                            width: monday.add(Duration(days: i)) == today
+                            width: days[i] == today
                                 ? 2
                                 : 1,
                           ),
                         ),
                         child: Text(
-                          '${monday.add(Duration(days: i)).day}',
+                          '${days[i].day}',
                           style: t.labelLarge?.copyWith(
                             color: trained.contains(i)
                                 ? scheme.surface

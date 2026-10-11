@@ -118,6 +118,10 @@ final templatesProvider = StreamProvider<List<TemplateDetail>>(
   (ref) => ref.watch(templateRepoProvider).watchAll(),
 );
 
+final templateFoldersProvider = StreamProvider<List<TemplateFolder>>(
+  (ref) => ref.watch(templateRepoProvider).watchFolders(),
+);
+
 final historyProvider = StreamProvider<List<Workout>>(
   (ref) => ref.watch(workoutRepoProvider).watchHistory(),
 );
@@ -172,12 +176,13 @@ class WeekSummary {
 final weekSummaryProvider = Provider.autoDispose<WeekSummary>((ref) {
   final history = ref.watch(historyProvider).value ?? const <Workout>[];
   final goal = ref.watch(settingsProvider.select((s) => s.weeklyGoal));
+  final firstDay = ref.watch(settingsProvider.select((s) => s.firstDayOfWeek));
   final now = DateTime.now();
-  final monday = weekStart(now);
+  final start = weekStart(now, firstDay);
   return WeekSummary(
-    workouts: history.where((w) => !w.startedAt.isBefore(monday)).length,
+    workouts: history.where((w) => !w.startedAt.isBefore(start)).length,
     goal: goal,
-    streak: weekStreak(history, now: now, goal: goal),
+    streak: weekStreak(history, now: now, goal: goal, firstDay: firstDay),
   );
 });
 

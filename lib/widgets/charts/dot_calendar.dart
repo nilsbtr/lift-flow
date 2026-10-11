@@ -6,19 +6,24 @@ import 'package:material_ui/material_ui.dart';
 import '../../domain/stats.dart';
 import 'chart_style.dart';
 
-/// GitHub-style grid of recent days, one column per week (Monday on top).
+/// GitHub-style grid of recent days, one column per week with [firstDay] on
+/// top.
 class DotCalendar extends StatelessWidget {
   const DotCalendar({
     super.key,
     required this.activity,
     required this.now,
     required this.semanticLabel,
+    this.firstDay = DateTime.monday,
     this.onTapDay,
   });
 
   final DayActivity activity;
   final DateTime now;
   final String semanticLabel;
+
+  /// [DateTime.monday] … [DateTime.sunday].
+  final int firstDay;
 
   /// Called for training days only.
   final ValueChanged<DateTime>? onTapDay;
@@ -39,7 +44,7 @@ class DotCalendar extends StatelessWidget {
           final weeks = ((w + _gap) / (_target + _gap)).floor().clamp(4, 26);
           final cell = (w + _gap) / weeks - _gap;
           final layout = _Layout(
-            first: addDays(weekStart(now), -7 * (weeks - 1)),
+            first: addDays(weekStart(now, firstDay), -7 * (weeks - 1)),
             weeks: weeks,
             cell: cell,
             top: labelH + _gap * 2,
@@ -130,11 +135,11 @@ class _CalendarPainter extends CustomPainter {
     final month = DateFormat('MMM');
     var labelRight = double.negativeInfinity;
     for (var w = 0; w < layout.weeks; w++) {
-      final monday = addDays(layout.first, w * 7);
+      final start = addDays(layout.first, w * 7);
       // Label the column where a month starts.
-      if (w == 0 || monday.day <= 7) {
+      if (w == 0 || start.day <= 7) {
         final tp = TextPainter(
-          text: TextSpan(text: month.format(monday), style: style.label),
+          text: TextSpan(text: month.format(start), style: style.label),
           textDirection: TextDirection.ltr,
           textScaler: scaler,
           maxLines: 1,
@@ -148,7 +153,7 @@ class _CalendarPainter extends CustomPainter {
         tp.dispose();
       }
       for (var d = 0; d < 7; d++) {
-        final day = addDays(monday, d);
+        final day = addDays(start, d);
         if (day.isAfter(today)) break;
         final r = RRect.fromRectAndRadius(
           layout.rect(w, d),

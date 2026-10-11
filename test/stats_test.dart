@@ -33,6 +33,9 @@ SetFact fact(
   LoadMode mode = LoadMode.none,
   double? bodyweight,
   MuscleGroup muscle = MuscleGroup.chest,
+  List<MuscleGroup> secondary = const [],
+  bool perSide = false,
+  bool perDumbbell = false,
 }) => SetFact(
   workoutId: workoutId,
   startedAt: at,
@@ -43,12 +46,16 @@ SetFact fact(
   reps: reps,
   bodyweightKg: bodyweight,
   muscleGroup: muscle,
+  secondaryMuscles: secondary,
+  perSide: perSide,
+  perDumbbell: perDumbbell,
 );
 
 WorkoutSet set(
   int id, {
   DateTime? at,
   bool warmup = false,
+  SetType? type,
   bool done = true,
   double load = 100,
   int reps = 5,
@@ -60,19 +67,28 @@ WorkoutSet set(
   reps: reps,
   isCompleted: done,
   completedAt: at,
-  isWarmup: warmup,
+  setType: type ?? (warmup ? SetType.warmup : SetType.normal),
 );
 
-Exercise exercise(int id, {MuscleGroup muscle = MuscleGroup.chest}) =>
-    Exercise(
-      id: id,
-      name: 'E$id',
-      muscleGroup: muscle,
-      trackingType: TrackingType.weights,
-      loadMode: LoadMode.none,
-      isArchived: false,
-      createdAt: DateTime(2024),
-    );
+Exercise exercise(
+  int id, {
+  MuscleGroup muscle = MuscleGroup.chest,
+  List<MuscleGroup> secondary = const [],
+  bool perSide = false,
+  bool perDumbbell = false,
+}) => Exercise(
+  id: id,
+  name: 'E$id',
+  muscleGroup: muscle,
+  trackingType: TrackingType.weights,
+  loadMode: LoadMode.none,
+  isArchived: false,
+  createdAt: DateTime(2024),
+  equipment: Equipment.none,
+  perSide: perSide,
+  perDumbbell: perDumbbell,
+  secondaryMuscles: secondary,
+);
 
 LoadedExercise loaded(Exercise e, List<WorkoutSet> sets) => LoadedExercise(
   WorkoutExercise(id: e.id, workoutId: 1, exerciseId: e.id, position: e.id),
@@ -92,6 +108,69 @@ void main() {
       // EU DST starts on 30 March 2025.
       expect(weekStart(DateTime(2025, 4, 2)), DateTime(2025, 3, 31));
       expect(addDays(DateTime(2025, 3, 29), 2), DateTime(2025, 3, 31));
+    });
+
+    test('weekStart follows the first day of the week', () {
+      // Wednesday 12 March 2025.
+      expect(weekStart(now, DateTime.sunday), DateTime(2025, 3, 9));
+      expect(weekStart(now, DateTime.saturday), DateTime(2025, 3, 8));
+      expect(weekStart(now, DateTime.wednesday), DateTime(2025, 3, 12));
+      expect(weekStart(now, DateTime.thursday), DateTime(2025, 3, 6));
+      // The first day itself, and the day before it.
+      final sunday = DateTime(2025, 3, 9, 23, 30);
+      expect(weekStart(sunday, DateTime.sunday), DateTime(2025, 3, 9));
+      expect(weekStart(sunday), DateTime(2025, 3, 3));
+      expect(weekStart(sunday, DateTime.saturday), DateTime(2025, 3, 8));
+      expect(
+        weekStart(DateTime(2025, 3, 8), DateTime.sunday),
+        DateTime(2025, 3, 2),
+      );
+      // Across the EU DST change on 30 March 2025, a Sunday.
+      expect(
+        weekStart(DateTime(2025, 4, 2), DateTime.sunday),
+        DateTime(2025, 3, 30),
+      );
+      expect(
+        weekStart(DateTime(2025, 4, 2), DateTime.saturday),
+        DateTime(2025, 3, 29),
+      );
+      for (var first = DateTime.monday; first <= DateTime.sunday; first++) {
+        for (var d = 1; d <= 14; d++) {
+          final start = weekStart(DateTime(2025, 3, d, 12), first);
+          expect(start.weekday, first);
+          expect(DateTime(2025, 3, d).difference(start).inHours, lessThan(168));
+          expect(start.isAfter(DateTime(2025, 3, d)), isFalse);
+        }
+      }
+    });
+
+    test('weeklyStats and weekStreak follow the first day of the week', () {
+      final ws = [
+        // Sunday 9 March: this week when weeks start on Sunday.
+        workout(1, DateTime(2025, 3, 9, 9)),
+        workout(2, DateTime(2025, 3, 4, 9)),
+      ];
+      final monday = weeklyStats(ws, now: now, weeks: 2);
+      expect(monday.map((s) => s.start), [
+        DateTime(2025, 3, 3),
+        DateTime(2025, 3, 10),
+      ]);
+      expect(monday.map((s) => s.workouts), [2, 0]);
+      final sunday = weeklyStats(
+        ws,
+        now: now,
+        weeks: 2,
+        firstDay: DateTime.sunday,
+      );
+      expect(sunday.map((s) => s.start), [
+        DateTime(2025, 3, 2),
+        DateTime(2025, 3, 9),
+      ]);
+      expect(sunday.map((s) => s.workouts), [1, 1]);
+      expect(weekStreak(ws, now: now), 1);
+      expect(weekStreak(ws, now: now, firstDay: DateTime.sunday), 2);
+      expect(weekStreak(ws, now: now, goal: 2), 1);
+      expect(weekStreak(ws, now: now, goal: 2, firstDay: DateTime.sunday), 0);
     });
 
     test('weeklyStats buckets and caps time', () {
@@ -220,6 +299,43 @@ void main() {
       expect(facts.single.muscleGroup, MuscleGroup.chest);
     });
 
+    test('sessionFacts keeps other set types and the exercise flags', () {
+      final e = exercise(
+        1,
+        secondary: [MuscleGroup.triceps],
+        perSide: true,
+        perDumbbell: true,
+      );
+      final w = workout(1, DateTime(2025, 1, 1));
+      final facts = sessionFacts(e, [
+        ExerciseSession(w, [
+          for (final (i, t) in SetType.values.indexed) set(i, type: t),
+        ]),
+      ]);
+      expect(facts, hasLength(SetType.values.length - 1));
+      expect(facts.first.secondaryMuscles, [MuscleGroup.triceps]);
+      expect(facts.first.volume, 200 * 10);
+    });
+
+    test('volume counts per-side reps and per-dumbbell load twice', () {
+      final d = DateTime(2025, 1, 1);
+      final facts = [
+        fact(1, d, load: 20, reps: 10, perDumbbell: true),
+        fact(1, d, load: 20, reps: 10, perSide: true),
+        fact(1, d, load: 20, reps: 10),
+      ];
+      expect(metricValue(TrendMetric.volume, facts), 400 + 400 + 200);
+      // Records and e1RM use the entered load.
+      expect(metricValue(TrendMetric.heaviest, facts), 20);
+      expect(
+        metricValue(TrendMetric.e1rm, facts),
+        closeTo(20 * (1 + 10 / 30), 1e-9),
+      );
+      final bests = ExerciseBests();
+      facts.forEach(bests.add);
+      expect(bests.heaviest, 20);
+    });
+
     test('defaultRange picks the smallest range with enough points', () {
       final recent = [for (var i = 0; i < 6; i++) DateTime(2025, 3, 1 + i)];
       expect(defaultRange(recent, now), TrendRange.m3);
@@ -242,6 +358,40 @@ void main() {
       expect(m[MuscleGroup.chest], 2);
       expect(m[MuscleGroup.back], 0.25);
       expect(m.containsKey(MuscleGroup.legs), isFalse);
+    });
+
+    test('secondary muscles count half a set', () {
+      final d = DateTime(2025, 3, 1);
+      final facts = [
+        for (var i = 0; i < 4; i++)
+          fact(
+            1,
+            d,
+            secondary: [MuscleGroup.triceps, MuscleGroup.shoulders],
+          ),
+        for (var i = 0; i < 2; i++) fact(2, d, muscle: MuscleGroup.triceps),
+        // A secondary group equal to the primary one is not counted twice.
+        fact(3, d, muscle: MuscleGroup.back, secondary: [MuscleGroup.back]),
+        // Outside the window.
+        fact(4, DateTime(2025, 2, 1), secondary: [MuscleGroup.biceps]),
+      ];
+      expect(setsPerMuscle(facts, now: now), {
+        MuscleGroup.chest: 1.0,
+        MuscleGroup.triceps: (4 * 0.5 + 2) / 4,
+        MuscleGroup.shoulders: 0.5,
+        MuscleGroup.back: 0.25,
+      });
+
+      final w = LoadedWorkout(workout(1, d), [
+        loaded(exercise(1, secondary: [MuscleGroup.triceps]), [
+          set(1, warmup: true),
+          set(2),
+          set(3, type: SetType.drop),
+          set(4, done: false),
+        ]),
+        loaded(exercise(2, muscle: MuscleGroup.triceps), [set(5)]),
+      ]);
+      expect(muscleSplit(w), {MuscleGroup.chest: 2.0, MuscleGroup.triceps: 2.0});
     });
 
     test('topLifts ranks by sessions, then sets', () {

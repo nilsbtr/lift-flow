@@ -65,6 +65,10 @@ class ExerciseRepository {
     required TrackingType trackingType,
     LoadMode loadMode = LoadMode.none,
     String? notes,
+    Equipment equipment = Equipment.none,
+    bool perSide = false,
+    bool perDumbbell = false,
+    List<MuscleGroup> secondaryMuscles = const [],
   }) async {
     final n = normalizeName(name);
     if (n.isEmpty || n.length > 60) {
@@ -83,10 +87,16 @@ class ExerciseRepository {
             ),
             notes: Value(_cleanNotes(notes)),
             createdAt: DateTime.now(),
+            equipment: Value(equipment),
+            perSide: Value(perSide),
+            perDumbbell: Value(perDumbbell),
+            secondaryMuscles: Value(_secondary(secondaryMuscles, muscleGroup)),
           ),
         );
   }
 
+  /// Null [equipment], [perSide], [perDumbbell] and [secondaryMuscles] keep
+  /// the stored values.
   Future<void> update(
     int id, {
     required String name,
@@ -94,6 +104,10 @@ class ExerciseRepository {
     required TrackingType trackingType,
     required LoadMode loadMode,
     String? notes,
+    Equipment? equipment,
+    bool? perSide,
+    bool? perDumbbell,
+    List<MuscleGroup>? secondaryMuscles,
   }) async {
     final n = normalizeName(name);
     if (n.isEmpty || n.length > 60) {
@@ -115,6 +129,12 @@ class ExerciseRepository {
           type == TrackingType.weights ? LoadMode.none : loadMode,
         ),
         notes: Value(_cleanNotes(notes)),
+        equipment: Value.absentIfNull(equipment),
+        perSide: Value.absentIfNull(perSide),
+        perDumbbell: Value.absentIfNull(perDumbbell),
+        secondaryMuscles: Value(
+          _secondary(secondaryMuscles ?? current.secondaryMuscles, muscleGroup),
+        ),
       ),
     );
   }
@@ -142,6 +162,15 @@ class ExerciseRepository {
     )..where((t) => t.exerciseId.equals(id))).go();
     await (_db.delete(_t)..where((e) => e.id.equals(id))).go();
   });
+
+  /// Distinct secondary groups without the primary one.
+  static List<MuscleGroup> _secondary(
+    List<MuscleGroup> groups,
+    MuscleGroup primary,
+  ) => [
+    for (final g in groups.toSet())
+      if (g != primary) g,
+  ];
 
   static String? _cleanNotes(String? notes) {
     final t = notes?.trim();

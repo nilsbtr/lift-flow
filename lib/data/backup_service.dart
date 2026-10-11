@@ -3,9 +3,10 @@ import 'dart:isolate';
 
 import 'package:drift/drift.dart';
 
+import '../domain/muscles.dart';
 import 'database.dart';
 
-const int kBackupVersion = 2;
+const int kBackupVersion = 3;
 const int kMaxBackupBytes = 20 * 1024 * 1024;
 
 class BackupFormatException implements Exception {
@@ -16,7 +17,8 @@ class BackupFormatException implements Exception {
 }
 
 /// JSON export / import of all data. Import replaces everything in a single
-/// transaction after strict validation.
+/// transaction after strict validation. Progress photos are files on the
+/// device and stay out of both.
 class BackupService {
   BackupService(this._db);
   final AppDatabase _db;
@@ -26,6 +28,7 @@ class BackupService {
       _db.appSettings,
     )..where((s) => s.id.equals(1))).getSingle();
     final exercises = await _db.select(_db.exercises).get();
+    final folders = await _db.select(_db.templateFolders).get();
     final templates = await _db.select(_db.workoutTemplates).get();
     final templateItems = await _db.select(_db.templateExercises).get();
     final workouts = await _db.select(_db.workouts).get();
@@ -47,6 +50,16 @@ class BackupService {
         'restAlerts': settings.restAlerts,
         'keepScreenOn': settings.keepScreenOn,
         'weeklyGoal': settings.weeklyGoal,
+        'effortMode': settings.effortMode.name,
+        'restSound': settings.restSound,
+        'firstDayOfWeek': settings.firstDayOfWeek,
+        'barWeightKg': settings.barWeightKg,
+        'plates': settings.plates,
+        'balanceMin': settings.balanceMin,
+        'balanceMax': settings.balanceMax,
+        'dynamicColor': settings.dynamicColor,
+        'reminderDays': settings.reminderDays,
+        'reminderMinutes': settings.reminderMinutes,
       },
       'bodyweight': [
         for (final b in bodyweight) {'date': _day(b.date), 'kg': b.kg},
@@ -62,6 +75,19 @@ class BackupService {
             'notes': e.notes,
             'isArchived': e.isArchived,
             'createdAt': _iso(e.createdAt),
+            'equipment': e.equipment.name,
+            'perSide': e.perSide,
+            'perDumbbell': e.perDumbbell,
+            'secondaryMuscles': [for (final g in e.secondaryMuscles) g.name],
+          },
+      ],
+      'folders': [
+        for (final f in folders)
+          {
+            'id': f.id,
+            'name': f.name,
+            'position': f.position,
+            'isCollapsed': f.isCollapsed,
           },
       ],
       'templates': [
@@ -70,6 +96,7 @@ class BackupService {
             'id': t.id,
             'name': t.name,
             'position': t.position,
+            'folderId': t.folderId,
             'items': [
               for (final i in templateItems)
                 if (i.templateId == t.id)
@@ -79,6 +106,9 @@ class BackupService {
                     'targetSets': i.targetSets,
                     'repsMin': i.repsMin,
                     'repsMax': i.repsMax,
+                    'restSeconds': i.restSeconds,
+                    'targetWeightKg': i.targetWeightKg,
+                    'supersetGroup': i.supersetGroup,
                   },
             ],
           },
@@ -95,6 +125,7 @@ class BackupService {
             'totalSets': w.totalSets,
             'totalVolumeKg': w.totalVolumeKg,
             'exerciseCount': w.exerciseCount,
+            'note': w.note,
             'exercises': [
               for (final we in wExercises)
                 if (we.workoutId == w.id)
@@ -103,6 +134,10 @@ class BackupService {
                     'position': we.position,
                     'targetRepsMin': we.targetRepsMin,
                     'targetRepsMax': we.targetRepsMax,
+                    'note': we.note,
+                    'supersetGroup': we.supersetGroup,
+                    'restSeconds': we.restSeconds,
+                    'targetWeightKg': we.targetWeightKg,
                     'sets': [
                       for (final s in sets)
                         if (s.workoutExerciseId == we.id)
@@ -114,7 +149,11 @@ class BackupService {
                             'completedAt': s.completedAt == null
                                 ? null
                                 : _iso(s.completedAt!),
-                            'isWarmup': s.isWarmup,
+                            'setType': s.setType.name,
+                            'rpe': s.rpe,
+                            'note': s.note,
+                            'durationSeconds': s.durationSeconds,
+                            'distanceM': s.distanceM,
                           },
                     ],
                   },
@@ -142,6 +181,7 @@ class BackupService {
       await _db.update(_db.appSettings).write(parsed.settings);
       await _db.batch((b) {
         b.insertAll(_db.exercises, parsed.exercises);
+        b.insertAll(_db.templateFolders, parsed.folders);
         b.insertAll(_db.workoutTemplates, parsed.templates);
         b.insertAll(_db.templateExercises, parsed.templateItems);
         b.insertAll(_db.workouts, parsed.workouts);
@@ -174,6 +214,7 @@ class BackupService {
     await _db.delete(_db.workouts).go();
     await _db.delete(_db.templateExercises).go();
     await _db.delete(_db.workoutTemplates).go();
+    await _db.delete(_db.templateFolders).go();
     await _db.delete(_db.exercises).go();
   }
 
@@ -198,6 +239,7 @@ class ParsedBackup {
   ParsedBackup({
     required this.settings,
     required this.exercises,
+    required this.folders,
     required this.templates,
     required this.templateItems,
     required this.workouts,
@@ -207,6 +249,7 @@ class ParsedBackup {
 
   final AppSettingsCompanion settings;
   final List<ExercisesCompanion> exercises;
+  final List<TemplateFoldersCompanion> folders;
   final List<WorkoutTemplatesCompanion> templates;
   final List<TemplateExercisesCompanion> templateItems;
   final List<WorkoutsCompanion> workouts;
@@ -294,6 +337,35 @@ T _enum<T extends Enum>(List<T> values, Map<String, Object?> m, String k) {
   _fail('"$k" has unknown value "$s"');
 }
 
+List<T> _enumList<T extends Enum>(
+  List<T> values,
+  Map<String, Object?> m,
+  String k,
+) => [
+  for (final raw in _list(m, k).toSet())
+    values.firstWhere(
+      (v) => v.name == raw,
+      orElse: () => _fail('"$k" has unknown value "$raw"'),
+    ),
+];
+
+int? _restOrNull(Map<String, Object?> m) =>
+    _intOrNull(m, 'restSeconds', min: 0, max: 3600);
+
+double? _targetOrNull(Map<String, Object?> m) =>
+    _numOrNull(m, 'targetWeightKg', min: 0, max: 2000);
+
+/// Comma-separated positive kg values, e.g. "25,20,10,5,2.5,1.25".
+String? _platesOrNull(Map<String, Object?> m, String k) {
+  final s = _strOrNull(m, k, max: 200);
+  if (s == null || s.trim().isEmpty) return s;
+  for (final part in s.split(',')) {
+    final kg = double.tryParse(part.trim());
+    if (kg == null || !kg.isFinite || kg <= 0) _fail('"$k" is not a plate list');
+  }
+  return s;
+}
+
 /// Pure parser + validator (runs in a background isolate).
 ParsedBackup parseBackup(Uint8List bytes) {
   final Object? root;
@@ -313,9 +385,13 @@ ParsedBackup parseBackup(Uint8List bytes) {
     );
   }
   final v2 = version >= 2;
+  final v3 = version >= 3;
 
   // Settings
   final s = _map(m['settings'], 'settings');
+  final balanceMin = v3 ? _int(s, 'balanceMin', min: 0, max: 100) : 10;
+  final balanceMax = v3 ? _int(s, 'balanceMax', min: 1, max: 100) : 20;
+  if (balanceMax < balanceMin) _fail('invalid balance range');
   final settings = AppSettingsCompanion(
     weightUnit: Value(_enum(WeightUnit.values, s, 'weightUnit')),
     themeMode: Value(_enum(ThemePref.values, s, 'themeMode')),
@@ -327,6 +403,31 @@ ParsedBackup parseBackup(Uint8List bytes) {
     keepScreenOn: Value(_bool(s, 'keepScreenOn')),
     permissionsPrompted: const Value(false),
     weeklyGoal: Value(v2 ? _intOrNull(s, 'weeklyGoal', min: 1, max: 7) : null),
+    effortMode: Value(
+      v3 ? _enum(EffortMode.values, s, 'effortMode') : EffortMode.off,
+    ),
+    restSound: Value(v3 && _bool(s, 'restSound')),
+    firstDayOfWeek: Value(
+      v3
+          ? _int(s, 'firstDayOfWeek', min: DateTime.monday, max: DateTime.sunday)
+          : DateTime.monday,
+    ),
+    barWeightKg: Value(
+      v3 ? _numOrNull(s, 'barWeightKg', min: 0, max: 500) : null,
+    ),
+    plates: Value(v3 ? _platesOrNull(s, 'plates') : null),
+    balanceMin: Value(balanceMin),
+    balanceMax: Value(balanceMax),
+    // Device-local state starts fresh, like the permission prompt.
+    lastBackupAt: const Value(null),
+    backupSnoozedAt: const Value(null),
+    appLock: const Value(false),
+    setMenuHintSeen: const Value(false),
+    dynamicColor: Value(v3 && _bool(s, 'dynamicColor')),
+    reminderDays: Value(v3 ? _int(s, 'reminderDays', min: 0, max: 127) : 0),
+    reminderMinutes: Value(
+      v3 ? _int(s, 'reminderMinutes', min: 0, max: 1439) : 1080,
+    ),
   );
 
   // Exercises
@@ -345,16 +446,26 @@ ParsedBackup parseBackup(Uint8List bytes) {
         ? LoadMode.none
         : _enum(LoadMode.values, e, 'loadMode');
     exerciseInfo[id] = (type, mode);
+    final group = _enum(MuscleGroup.values, e, 'muscleGroup');
     exercises.add(
       ExercisesCompanion.insert(
         id: Value(id),
         name: name,
-        muscleGroup: _enum(MuscleGroup.values, e, 'muscleGroup'),
+        // Older backups only know the generic arms and legs groups.
+        muscleGroup: v3 ? group : refineMuscleGroup(name, group),
         trackingType: type,
         loadMode: Value(mode),
         notes: Value(_strOrNull(e, 'notes', max: 500)),
         isArchived: Value(_bool(e, 'isArchived')),
         createdAt: _date(e, 'createdAt'),
+        equipment: Value(
+          v3 ? _enum(Equipment.values, e, 'equipment') : Equipment.none,
+        ),
+        perSide: Value(v3 && _bool(e, 'perSide')),
+        perDumbbell: Value(v3 && _bool(e, 'perDumbbell')),
+        secondaryMuscles: Value(
+          v3 ? _enumList(MuscleGroup.values, e, 'secondaryMuscles') : const [],
+        ),
       ),
     );
   }
@@ -365,6 +476,25 @@ ParsedBackup parseBackup(Uint8List bytes) {
     return id;
   }
 
+  // Template folders
+  final folderIds = <int>{};
+  final folders = <TemplateFoldersCompanion>[];
+  for (final raw in v3 ? _list(m, 'folders') : const <Object?>[]) {
+    final f = _map(raw, 'folder');
+    final id = _int(f, 'id', min: 1);
+    if (!folderIds.add(id)) _fail('duplicate folder id $id');
+    final name = _str(f, 'name', min: 1, max: 60).trim();
+    if (name.isEmpty) _fail('folder name is empty');
+    folders.add(
+      TemplateFoldersCompanion.insert(
+        id: Value(id),
+        name: name,
+        position: Value(_int(f, 'position', min: 0)),
+        isCollapsed: Value(_bool(f, 'isCollapsed')),
+      ),
+    );
+  }
+
   // Templates
   final templateIds = <int>{};
   final templates = <WorkoutTemplatesCompanion>[];
@@ -373,11 +503,13 @@ ParsedBackup parseBackup(Uint8List bytes) {
     final t = _map(raw, 'template');
     final id = _int(t, 'id', min: 1);
     if (!templateIds.add(id)) _fail('duplicate template id $id');
+    final folderId = v3 ? _intOrNull(t, 'folderId') : null;
     templates.add(
       WorkoutTemplatesCompanion.insert(
         id: Value(id),
         name: _str(t, 'name', min: 1, max: 60),
         position: Value(_int(t, 'position', min: 0)),
+        folderId: Value(folderIds.contains(folderId) ? folderId : null),
       ),
     );
     for (final rawItem in _list(t, 'items')) {
@@ -393,6 +525,9 @@ ParsedBackup parseBackup(Uint8List bytes) {
           targetSets: Value(_int(i, 'targetSets', min: 1, max: 10)),
           repsMin: Value(min),
           repsMax: Value(max),
+          restSeconds: Value(v3 ? _restOrNull(i) : null),
+          targetWeightKg: Value(v3 ? _targetOrNull(i) : null),
+          supersetGroup: Value(v3 ? _intOrNull(i, 'supersetGroup') : null),
         ),
       );
     }
@@ -435,6 +570,7 @@ ParsedBackup parseBackup(Uint8List bytes) {
         totalSets: Value(_int(w, 'totalSets', min: 0)),
         totalVolumeKg: Value(_numOrNull(w, 'totalVolumeKg', min: 0) ?? 0),
         exerciseCount: Value(_int(w, 'exerciseCount', min: 0)),
+        note: Value(v3 ? _strOrNull(w, 'note', max: 500) : null),
       ),
     );
     for (final rawEx in _list(w, 'exercises')) {
@@ -464,7 +600,19 @@ ParsedBackup parseBackup(Uint8List bytes) {
             reps: Value(_intOrNull(st, 'reps', min: 0, max: 1000)),
             isCompleted: Value(_bool(st, 'isCompleted')),
             completedAt: Value(_dateOrNull(st, 'completedAt')),
-            isWarmup: Value(v2 && _bool(st, 'isWarmup')),
+            setType: Value(switch (version) {
+              1 => SetType.normal,
+              2 => _bool(st, 'isWarmup') ? SetType.warmup : SetType.normal,
+              _ => _enum(SetType.values, st, 'setType'),
+            }),
+            rpe: Value(v3 ? _numOrNull(st, 'rpe', min: 1, max: 10) : null),
+            note: Value(v3 ? _strOrNull(st, 'note', max: 500) : null),
+            durationSeconds: Value(
+              v3 ? _intOrNull(st, 'durationSeconds', min: 0, max: 86400) : null,
+            ),
+            distanceM: Value(
+              v3 ? _numOrNull(st, 'distanceM', min: 0, max: 1000000) : null,
+            ),
           ),
         );
       }
@@ -480,6 +628,10 @@ ParsedBackup parseBackup(Uint8List bytes) {
             targetRepsMax: Value(
               _intOrNull(e, 'targetRepsMax', min: 1, max: 100),
             ),
+            note: Value(v3 ? _strOrNull(e, 'note', max: 500) : null),
+            supersetGroup: Value(v3 ? _intOrNull(e, 'supersetGroup') : null),
+            restSeconds: Value(v3 ? _restOrNull(e) : null),
+            targetWeightKg: Value(v3 ? _targetOrNull(e) : null),
           ),
           sets,
         ),
@@ -505,6 +657,7 @@ ParsedBackup parseBackup(Uint8List bytes) {
   return ParsedBackup(
     settings: settings,
     exercises: exercises,
+    folders: folders,
     templates: templates,
     templateItems: templateItems,
     workouts: workouts,

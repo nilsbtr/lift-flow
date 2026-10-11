@@ -14,20 +14,24 @@ double? effectiveLoad({
   return bodyweightKg + (loadKg ?? 0);
 }
 
+/// Volume of one set in kg. [perDumbbell] counts the entered load twice and
+/// [perSide] the reps. Records and e1RM use the entered values instead.
 double setVolume({
   required TrackingType type,
   required double? loadKg,
   required int? reps,
   required double? bodyweightKg,
+  bool perSide = false,
+  bool perDumbbell = false,
 }) {
   if (reps == null || reps <= 0) return 0;
   final eff = effectiveLoad(
     type: type,
-    loadKg: loadKg,
+    loadKg: perDumbbell && loadKg != null && loadKg > 0 ? loadKg * 2 : loadKg,
     bodyweightKg: bodyweightKg,
   );
   if (eff == null || eff <= 0) return 0;
-  return eff * reps;
+  return eff * (perSide ? reps * 2 : reps);
 }
 
 /// Epley estimated 1RM; only meaningful for 1–12 reps.
@@ -59,6 +63,9 @@ class SetFact {
     required this.reps,
     required this.bodyweightKg,
     this.muscleGroup = MuscleGroup.other,
+    this.secondaryMuscles = const [],
+    this.perSide = false,
+    this.perDumbbell = false,
   });
 
   final int workoutId;
@@ -70,6 +77,18 @@ class SetFact {
   final int? reps;
   final double? bodyweightKg;
   final MuscleGroup muscleGroup;
+  final List<MuscleGroup> secondaryMuscles;
+  final bool perSide;
+  final bool perDumbbell;
+
+  double get volume => setVolume(
+    type: type,
+    loadKg: loadKg,
+    reps: reps,
+    bodyweightKg: bodyweightKg,
+    perSide: perSide,
+    perDumbbell: perDumbbell,
+  );
 }
 
 /// Best values of one exercise over a set of facts.

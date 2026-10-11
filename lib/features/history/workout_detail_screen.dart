@@ -140,7 +140,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: Space.sm),
                     for (final (i, label) in setLabels(
-                      ex.sets.map((s) => s.isWarmup),
+                      ex.sets.map((s) => s.setType),
                     ).indexed)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2),
@@ -150,11 +150,11 @@ class WorkoutDetailScreen extends ConsumerWidget {
                               width: 28,
                               child: Text(
                                 label,
-                                semanticsLabel: ex.sets[i].isWarmup
+                                semanticsLabel: ex.sets[i].setType.isWarmup
                                     ? 'Warm-up'
                                     : 'Set $label',
                                 style: t.bodyMedium?.copyWith(
-                                  color: ex.sets[i].isWarmup
+                                  color: ex.sets[i].setType.isWarmup
                                       ? lift.rest
                                       : lift.muted,
                                 ),

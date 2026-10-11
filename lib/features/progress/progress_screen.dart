@@ -77,7 +77,14 @@ class _ConsistencyCard extends ConsumerWidget {
     final lift = LiftColors.of(context);
     final now = DateTime.now();
     final goal = week.goal;
-    final recent = weeklyStats(history, now: now).map((w) => w.workouts).sum;
+    final firstDay = ref.watch(
+      settingsProvider.select((s) => s.firstDayOfWeek),
+    );
+    final recent = weeklyStats(
+      history,
+      now: now,
+      firstDay: firstDay,
+    ).map((w) => w.workouts).sum;
 
     return ChartCard(
       title: 'Consistency',
@@ -104,6 +111,7 @@ class _ConsistencyCard extends ConsumerWidget {
           DotCalendar(
             activity: dayActivity(history),
             now: now,
+            firstDay: firstDay,
             semanticLabel:
                 '${_count(recent, 'workout')} in the last 12 weeks',
             onTapDay: (day) => showAppSheet<void>(
@@ -187,7 +195,11 @@ class _WeeklyCardState extends ConsumerState<_WeeklyCard> {
   Widget build(BuildContext context) {
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
     final goal = ref.watch(settingsProvider.select((s) => s.weeklyGoal));
-    final weeks = weeklyStats(widget.history, now: DateTime.now());
+    final weeks = weeklyStats(
+      widget.history,
+      now: DateTime.now(),
+      firstDay: ref.watch(settingsProvider.select((s) => s.firstDayOfWeek)),
+    );
 
     double value(WeekStats w) => switch (_load) {
       _Load.volume => kgToUnit(w.volumeKg, unit),

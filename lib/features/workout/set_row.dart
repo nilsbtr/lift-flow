@@ -176,8 +176,9 @@ class _SetRowState extends ConsumerState<SetRow> {
     final lift = LiftColors.of(context);
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
+    final warmup = s.setType.isWarmup;
     final hint = ex.hintFor(widget.index);
-    final label = setLabels(ex.sets.map((s) => s.isWarmup))[widget.index];
+    final label = setLabels(ex.sets.map((s) => s.setType))[widget.index];
     final prev = widget.index < ex.previous.length
         ? ex.previous[widget.index]
         : null;
@@ -218,8 +219,8 @@ class _SetRowState extends ConsumerState<SetRow> {
               height: kMinTap,
               child: Semantics(
                 button: true,
-                label: s.isWarmup ? 'Warm-up set' : 'Set $label',
-                hint: s.isWarmup ? 'Make working set' : 'Make warm-up',
+                label: warmup ? 'Warm-up set' : 'Set $label',
+                hint: warmup ? 'Make working set' : 'Make warm-up',
                 excludeSemantics: true,
                 child: InkWell(
                   customBorder: const StadiumBorder(),
@@ -232,7 +233,7 @@ class _SetRowState extends ConsumerState<SetRow> {
                       label,
                       textAlign: TextAlign.center,
                       style: t.titleSmall?.copyWith(
-                        color: s.isWarmup
+                        color: warmup
                             ? lift.rest
                             : done
                             ? lift.done

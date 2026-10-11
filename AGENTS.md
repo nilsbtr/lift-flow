@@ -17,17 +17,21 @@ Lift Flow is a local-only Flutter gym tracker (Android first). See [README.md](R
 
 ## Architecture
 
-- **Data** (`lib/data/`): drift tables live in `database.dart`, enums in `enums.dart` (re-exported). Repositories wrap all queries; UI never touches `AppDatabase` directly.
+- **Data** (`lib/data/`): drift tables live in `database.dart` (schema v3), enums in `enums.dart` (re-exported). Repositories wrap all queries; UI never touches `AppDatabase` directly.
 - **Providers** (`lib/providers.dart`): repo providers, `StreamProvider`s over drift `watch*()`, `settingsProvider` (Notifier), `restTimerProvider`, `liveWorkoutProvider`. `databaseProvider` and the `initial*Provider`s are overridden in `main.dart` with values preloaded before `runApp`, so the first frame has no loading state.
 - **Workout editing**: `workoutEditorProvider(id)` (`features/workout/workout_controller.dart`) is an `AsyncNotifier` family. Edits update state right away and are written to the DB after a 400 ms debounce, plus a flush on blur, pause, or dispose. Live workouts are kept alive.
-- **Domain** (`lib/domain/`): pure functions, which are what the unit tests cover. `units.dart` handles kg↔lb, parsing, and formatting. `records.dart` handles volume, Epley e1RM, and PRs.
+- **Domain** (`lib/domain/`): pure functions, which are what the unit tests cover. `units.dart` handles kg↔lb, parsing, and formatting. `records.dart` handles volume, Epley e1RM, and PRs. `stats.dart` handles weeks, trends, and muscle balance. `muscles.dart` remaps legacy muscle groups.
 - **Routing** (`router.dart`): tabs are `/`, `/history`, `/progress`, `/gym`, `/settings`. Full-screen routes (`/workout`, `…/edit`, `/gym/template/:templateId`) use `parentNavigatorKey: rootNavigatorKey`. Detail screens are nested in every tab that links to them (`_exerciseRoute`, `_workoutRoute`), so navigation never jumps tabs. Link with `go` to a path in the current tab (`WorkoutDetailScreen` builds on `GoRouterState.of(context).matchedLocation`). Use `push` only for full-screen editors that pop back. The Gym segment is in the URL (`/gym?tab=templates`). Back from a tab root goes to Home.
 
 ## Rules and gotchas
 
 - **Units**: always store kg. Convert only at the UI edge with `kgToUnit`/`unitToKg`/`fmtWeight`. Bodyweight loads are signed: `added` ≥ 0, `assisted` ≤ 0, `none` is null.
+- **Set types**: `WorkoutSets.setType` (`SetType`) replaced the old warm-up flag. Only `warmup` is left out of totals, facts, and records (`setType.isWarmup`); drop, failure, and AMRAP sets are working sets.
+- **Volume**: use `setVolume`/`SetFact.volume`, which apply the exercise's `perSide` (reps ×2) and `perDumbbell` (load ×2) flags. Records and e1RM use the entered load.
+- **Muscle groups**: `arms` and `legs` are legacy values kept for old data and backups. Offer `MuscleGroup.selectable` (or `selectableWith` to keep an exercise's current legacy group) in pickers. In balance stats a set counts 1 for the primary group and 0.5 for each of `secondaryMuscles`.
+- **Weeks**: start on `AppSettings.firstDayOfWeek`. Pass it to `weekStart`, `weeklyStats`, `weekStreak`, and `DotCalendar`; never assume Monday.
 - **Singleton rows** (`AppSettings`, `RestState`): always write with `id: Value(1)`. Leaving the id out creates a new rowid and duplicates the row.
-- **Schema changes**: bump `schemaVersion`, add a migration step, and export schemas (`dart run drift_dev make-migrations`, configured in `build.yaml`). Update `BackupService` export/parse and `kBackupVersion` when the shape changes.
+- **Schema changes**: bump `schemaVersion`, add a migration step, and export schemas (`dart run drift_dev make-migrations`, configured in `build.yaml`). Update `BackupService` export/parse and `kBackupVersion` (now 3) when the shape changes; older versions must keep importing with defaults. Device-local settings (`permissionsPrompted`, `lastBackupAt`, `backupSnoozedAt`, `appLock`, `setMenuHintSeen`) are not exported and reset on import. `ProgressPhotos` stays out of backups, and import and delete-all leave it alone.
 - **Isolates**: `Isolate.run` closures inside instance methods capture `this` (the DB can't be sent). Use static closure factories, as in `BackupService._encoder`/`_parser`.
 - **Riverpod 3**: family notifiers get their argument through the constructor. Use `AsyncValue.value` (there is no `valueOrNull`). `KeepAliveLink` comes from `package:flutter_riverpod/misc.dart`.
 - **Sheets**: use `showAppSheet` (`widgets/common.dart`). It uses the root navigator and pads for both the keyboard and the gesture bar.
@@ -42,4 +46,4 @@ Lift Flow is a local-only Flutter gym tracker (Android first). See [README.md](R
 
 ## Tests
 
-`test/app_test.dart` runs against `AppDatabase(NativeDatabase.memory())`. Add tests there for repository, domain, and backup logic when you change it.
+`test/app_test.dart` runs against `AppDatabase(NativeDatabase.memory())`. Add tests there for repository, domain, and backup logic when you change it. Stats live in `test/stats_test.dart`; `test/drift/lift_flow/migration_test.dart` covers every schema step, with data for the steps that convert it.
