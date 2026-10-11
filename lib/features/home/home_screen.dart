@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -5,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
 import '../../data/template_repository.dart';
+import '../../domain/backup_nudge.dart';
 import '../../domain/history.dart';
 import '../../domain/stats.dart';
 import '../../domain/supersets.dart';
@@ -19,6 +22,7 @@ import '../gym/gym_screen.dart';
 import '../gym/template_folders.dart';
 import '../history/history_screen.dart';
 import '../history/workout_day_sheet.dart';
+import '../settings/backup_actions.dart';
 import '../workout/workout_actions.dart';
 
 String relativeDay(DateTime d, [DateTime? now]) {
@@ -98,6 +102,7 @@ class HomeScreen extends ConsumerWidget {
             padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
             child: _StartButton(),
           ),
+          const _BackupNudge(),
           if (history.isNotEmpty) ...[
             const SectionLabel('Last workout'),
             Padding(
@@ -345,6 +350,80 @@ class _WeekCaption extends ConsumerWidget {
               const AppIcon(AppIcons.chevronRight, size: IconSizes.sm),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A dismissible suggestion to back up after [kBackupNudgeEvery] workouts.
+class _BackupNudge extends ConsumerWidget {
+  const _BackupNudge();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lastBackup = ref.watch(
+      settingsProvider.select((s) => s.lastBackupAt),
+    );
+    final snoozed = ref.watch(
+      settingsProvider.select((s) => s.backupSnoozedAt),
+    );
+    final history = ref.watch(historyProvider).value ?? const <Workout>[];
+    final finished = [
+      for (final w in history)
+        if (w.endedAt != null) w.endedAt!,
+    ];
+    if (!backupNudgeDue(
+      finished,
+      lastBackupAt: lastBackup,
+      snoozedAt: snoozed,
+    )) {
+      return const SizedBox.shrink();
+    }
+    final n = workoutsSinceBackup(
+      finished,
+      lastBackupAt: lastBackup,
+      snoozedAt: snoozed,
+    );
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
+      child: FlatCard(
+        padding: const EdgeInsets.fromLTRB(
+          Space.lg,
+          Space.md,
+          Space.xs,
+          Space.md,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Back up your data', style: t.titleMedium),
+                  Text(
+                    '$n workouts since '
+                    '${lastBackup == null ? 'you started' : 'your last backup'}.',
+                    style: t.bodyMedium?.copyWith(
+                      color: LiftColors.of(context).muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => exportBackup(context, ref),
+              child: const Text('Back up now'),
+            ),
+            IconButton(
+              tooltip: 'Dismiss',
+              onPressed: () => unawaited(
+                ref.read(settingsProvider.notifier).snoozeBackupNudge(),
+              ),
+              icon: const AppIcon(AppIcons.close),
+            ),
+          ],
         ),
       ),
     );

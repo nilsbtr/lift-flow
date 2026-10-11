@@ -124,6 +124,12 @@ class SettingsController extends Notifier<UserSettings> {
     await setBodyweight((await repo.latest())?.kg);
   }
 
+  Future<void> markBackedUp() =>
+      update(AppSettingsCompanion(lastBackupAt: Value(DateTime.now())));
+
+  Future<void> snoozeBackupNudge() =>
+      update(AppSettingsCompanion(backupSnoozedAt: Value(DateTime.now())));
+
   Future<void> setWeeklyGoal(int? goal) =>
       update(AppSettingsCompanion(weeklyGoal: Value(goal?.clamp(1, 7))));
 }

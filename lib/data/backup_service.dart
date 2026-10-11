@@ -318,6 +318,14 @@ DateTime _date(Map<String, Object?> m, String k) {
 DateTime? _dateOrNull(Map<String, Object?> m, String k) =>
     m[k] == null ? null : _date(m, k);
 
+/// When the file was made, never in the future. Falls back to now.
+DateTime _exportedAt(Map<String, Object?> m) {
+  final raw = m['exportedAt'];
+  final at = raw is String ? DateTime.tryParse(raw)?.toLocal() : null;
+  final now = DateTime.now();
+  return at == null || at.isAfter(now) ? now : at;
+}
+
 final _dayPattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
 DateTime _localDay(Map<String, Object?> m, String k) {
@@ -419,8 +427,9 @@ ParsedBackup parseBackup(Uint8List bytes) {
     balanceMin: Value(balanceMin),
     balanceMax: Value(balanceMax),
     // Device-local state starts fresh, like the permission prompt. The app
-    // lock is absent so an import keeps this device's choice.
-    lastBackupAt: const Value(null),
+    // lock is absent so an import keeps this device's choice. The data now
+    // equals the file, so it counts as backed up from when that was made.
+    lastBackupAt: Value(_exportedAt(m)),
     backupSnoozedAt: const Value(null),
     setMenuHintSeen: const Value(false),
     dynamicColor: Value(v3 && _bool(s, 'dynamicColor')),
