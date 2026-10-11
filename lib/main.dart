@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'app.dart';
 import 'data/database.dart';
@@ -27,12 +28,13 @@ Future<void> main() async {
 
   final db = AppDatabase();
   final notifications = NotificationService();
-  final (settings, live, rest, _, _) = await (
+  final (settings, live, rest, _, _, pkg) = await (
     SettingsRepository(db).get(),
     WorkoutRepository(db).getLive(),
     RestRepository(db).get(),
     notifications.init(),
     AppIcons.precache(),
+    PackageInfo.fromPlatform(),
   ).wait;
 
   runApp(
@@ -44,6 +46,7 @@ Future<void> main() async {
         initialSettingsProvider.overrideWithValue(settings),
         initialLiveWorkoutProvider.overrideWithValue(live),
         initialRestProvider.overrideWithValue(rest),
+        initialPackageInfoProvider.overrideWithValue(pkg),
       ],
       child: const LiftFlowApp(),
     ),
