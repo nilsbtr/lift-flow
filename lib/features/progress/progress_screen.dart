@@ -20,6 +20,7 @@ import '../../widgets/charts/sparkline.dart';
 import '../../widgets/charts/trend_chart.dart';
 import '../../widgets/charts/week_bar_chart.dart';
 import '../../widgets/common.dart';
+import '../history/workout_day_sheet.dart';
 import 'progress_providers.dart';
 
 final _day = DateFormat('EEE, d MMM y');
@@ -122,15 +123,11 @@ class _ConsistencyCard extends ConsumerWidget {
               return '${_count(recent, 'workout')} in the last '
                   '${_count(weeks, 'week')}';
             },
-            onTapDay: (day) => showAppSheet<void>(
+            onTapDay: (day) => showWorkoutDaySheet(
               context,
-              (_) => _DaySheet(
-                day: day,
-                workouts: [
-                  for (final w in history)
-                    if (dayOf(w.startedAt) == day) w,
-                ].reversed.toList(),
-              ),
+              day: day,
+              history: history,
+              workoutPath: (id) => '/progress/workout/$id',
             ),
           ),
         ],
@@ -140,41 +137,6 @@ class _ConsistencyCard extends ConsumerWidget {
 }
 
 String _count(int n, String noun) => '$n $noun${n == 1 ? '' : 's'}';
-
-class _DaySheet extends StatelessWidget {
-  const _DaySheet({required this.day, required this.workouts});
-  final DateTime day;
-  final List<Workout> workouts;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-          child: Text(_day.format(day), style: t.titleLarge),
-        ),
-        for (final w in workouts)
-          ListTile(
-            title: Text(w.name),
-            subtitle: Text(
-              '${fmtDuration(workoutTime(w))} · ${_count(w.totalSets, 'set')}',
-            ),
-            trailing: const AppIcon(AppIcons.chevronRight),
-            onTap: () {
-              final router = GoRouter.of(context);
-              Navigator.pop(context);
-              router.go('/progress/workout/${w.id}');
-            },
-          ),
-        const SizedBox(height: Space.sm),
-      ],
-    );
-  }
-}
 
 // ------------------------------------------------------------ weekly load
 
