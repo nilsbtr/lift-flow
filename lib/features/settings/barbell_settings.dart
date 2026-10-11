@@ -217,14 +217,15 @@ class _PlatesSheetState extends ConsumerState<_PlatesSheet> {
               ],
             ),
             const SizedBox(height: Space.md),
-            Row(
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: Space.sm,
               children: [
                 if (s.plates != null)
                   TextButton(
                     onPressed: () => _write(null),
                     child: const Text('Use default'),
                   ),
-                const Spacer(),
                 FilledButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Done'),
