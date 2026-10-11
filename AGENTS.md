@@ -37,6 +37,9 @@ Lift Flow is a local-only Flutter gym tracker (Android first). See [README.md](R
 - **Riverpod 3**: family notifiers get their argument through the constructor. Use `AsyncValue.value` (there is no `valueOrNull`). `KeepAliveLink` comes from `package:flutter_riverpod/misc.dart`.
 - **Sheets**: use `showAppSheet` (`widgets/common.dart`). It uses the root navigator and pads for both the keyboard and the gesture bar.
 - **Timers in UI**: use `PeriodicBuilder` with an `anchor`, not a raw `Timer`/`setState`.
+- **Set delete**: delete sets in the workout screen with `removeSetWithUndo` (`set_menu_sheet.dart`). `WorkoutEditor.removeSet` only hides the set; `commitDelete` writes it when the snackbar closes and on finish, discard, pause, and dispose. A new command that ends or leaves the workout must call `commitDelete` first.
+- **Set rows**: the header and rows share their column widths through `SetCols.fit`, which lets Previous shrink before the inputs at large text sizes. Add a column there, not as a fixed `SizedBox`. List finished sets with `SetList` (`widgets/set_list.dart`) and label them with `setLabels`/`setTypeColor`.
+- **Effort**: `WorkoutSets.rpe` is always RPE. Convert at the UI edge with `fmtEffort`/`fmtEffortLabel`/`parseEffort` and `AppSettings.effortMode`, and show nothing when the mode is off.
 
 ## Theme and icons
 
