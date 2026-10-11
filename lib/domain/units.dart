@@ -131,6 +131,24 @@ String fmtClock(int seconds) {
   return (min: a, max: b);
 }
 
+/// Parses the separate min and max rep fields. Both empty means no target and
+/// an empty max means exactly min. [error] explains why a pair can't be used.
+({int? min, int? max, String? error}) parseRepsFields(String min, String max) {
+  final a = min.trim();
+  final b = max.trim();
+  if (a.isEmpty && b.isEmpty) return (min: null, max: null, error: null);
+  ({int? min, int? max, String? error}) bad(String error) =>
+      (min: null, max: null, error: error);
+  if (a.isEmpty) return bad('Enter the min reps first');
+  final lo = int.tryParse(a);
+  final hi = b.isEmpty ? lo : int.tryParse(b);
+  if (lo == null || hi == null || lo < 1 || hi > 100) {
+    return bad('Use 1–100 reps');
+  }
+  if (lo > hi) return bad('Max must be at least min');
+  return (min: lo, max: lo == hi ? null : hi, error: null);
+}
+
 String fmtRepsRange(int? min, int? max) {
   if (min == null) return '';
   if (max == null || max == min) return '$min';
