@@ -135,6 +135,47 @@ class ExerciseBests {
   static double _max(double? a, double b) => a == null || b > a ? b : a;
 }
 
+/// Best load at one rep count.
+class RepMax {
+  const RepMax(this.reps, this.loadKg, this.workoutId, this.date);
+  final int reps;
+  final double loadKg;
+  final int workoutId;
+  final DateTime date;
+}
+
+/// Whether a table of best loads per rep count says anything for [mode].
+/// Bodyweight-only sets all carry the same load.
+bool hasRepMaxes(TrackingType type, LoadMode mode) =>
+    type == TrackingType.weights || mode != LoadMode.none;
+
+/// Best load at each exact rep count from 1 to [maxReps], by reps. [facts] are
+/// working sets (warm-ups are left out when building them). Loads are the
+/// entered ones: for bodyweight exercises the signed extra or assisted load,
+/// where the higher value (closer to zero when assisted) is better. An equal
+/// load keeps the date it was first set. Counts without a set are left out.
+List<RepMax> repMaxes(Iterable<SetFact> facts, {int maxReps = 12}) {
+  final sorted = [...facts]
+    ..sort((a, b) {
+      final c = a.startedAt.compareTo(b.startedAt);
+      return c != 0 ? c : a.workoutId.compareTo(b.workoutId);
+    });
+  final best = <int, RepMax>{};
+  for (final f in sorted) {
+    final reps = f.reps;
+    if (reps == null || reps < 1 || reps > maxReps) continue;
+    if (!hasRepMaxes(f.type, f.mode)) continue;
+    final weights = f.type == TrackingType.weights;
+    final load = f.loadKg ?? (weights ? null : 0);
+    if (load == null || (weights && load <= 0)) continue;
+    final prev = best[reps];
+    if (prev == null || load > prev.loadKg + _eps) {
+      best[reps] = RepMax(reps, load, f.workoutId, f.startedAt);
+    }
+  }
+  return [for (final r in best.keys.toList()..sort()) best[r]!];
+}
+
 /// Computes PRs set in [workoutId]. [facts] must contain all completed sets of
 /// finished workouts for the relevant exercises, including [workoutId].
 /// A PR requires an earlier best to beat. Returns exerciseId → kinds.

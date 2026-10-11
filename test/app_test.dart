@@ -12,9 +12,11 @@ import 'package:lift_flow/data/exercise_repository.dart';
 import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/template_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
+import 'package:lift_flow/domain/exercise_search.dart';
 import 'package:lift_flow/domain/muscles.dart';
 import 'package:lift_flow/domain/records.dart';
 import 'package:lift_flow/domain/rest.dart';
+import 'package:lift_flow/domain/stats.dart';
 import 'package:lift_flow/domain/units.dart';
 import 'package:lift_flow/providers.dart';
 import 'package:lift_flow/services/notifications.dart';
@@ -159,6 +161,214 @@ void main() {
       final r = adjustRest(at(3590), 3600, 30, now)!;
       expect(r.endsAt, at(kMaxRestSeconds));
       expect(r.totalSeconds, kMaxRestSeconds);
+    });
+  });
+
+  group('exercise search', () {
+    Exercise ex(
+      int id,
+      String name, {
+      MuscleGroup group = MuscleGroup.chest,
+      Equipment equipment = Equipment.none,
+      TrackingType type = TrackingType.weights,
+      List<MuscleGroup> secondary = const [],
+    }) => Exercise(
+      id: id,
+      name: name,
+      muscleGroup: group,
+      trackingType: type,
+      loadMode: LoadMode.none,
+      isArchived: false,
+      createdAt: DateTime(2025),
+      equipment: equipment,
+      perSide: false,
+      perDumbbell: false,
+      secondaryMuscles: secondary,
+    );
+
+    final library = [
+      ex(1, 'Bench press', equipment: Equipment.barbell),
+      ex(2, 'Dumbbell bench press', equipment: Equipment.dumbbell),
+      ex(3, 'Incline press', equipment: Equipment.dumbbell),
+      ex(4, 'Overhead press', group: MuscleGroup.shoulders),
+      ex(5, 'Romanian deadlift', group: MuscleGroup.hamstrings),
+      ex(6, 'Deadlift', group: MuscleGroup.back),
+      ex(7, 'Hammer curls', group: MuscleGroup.biceps),
+      ex(
+        8,
+        'Pull-up',
+        group: MuscleGroup.back,
+        type: TrackingType.bodyweight,
+        secondary: [MuscleGroup.biceps],
+      ),
+    ];
+
+    List<int> find(String q, {MuscleGroup? group, List<Exercise>? from}) => [
+      for (final e in rankExercises(from ?? library, query: q, group: group).exercises)
+        e.id,
+    ];
+
+    test('words match in any order and by prefix', () {
+      expect(find('press bench'), [1, 2]);
+      expect(find('inc pr'), [3]);
+      expect(find('curl'), [7]);
+      expect(find('xyz'), isEmpty);
+    });
+
+    test('abbreviations expand', () {
+      expect(find('db bench'), [2]);
+      expect(find('bb bench'), [1]);
+      expect(find('ohp'), [4]);
+      expect(find('rdl'), [5]);
+      expect(find('dl'), [6, 5]);
+    });
+
+    test('equipment, muscle and secondary muscles can match', () {
+      expect(find('barbell'), [1]);
+      expect(find('hamstrings'), [5]);
+      expect(find('bicep'), [7, 8]);
+      expect(find('bodyweight'), [8]);
+    });
+
+    test('name matches outrank equipment matches', () {
+      final l = [
+        ex(1, 'Cable row', group: MuscleGroup.back),
+        ex(2, 'Row', equipment: Equipment.dumbbell, group: MuscleGroup.back),
+        ex(3, 'Dumbbell press', equipment: Equipment.dumbbell),
+      ];
+      expect(find('dumbbell', from: l), [3, 2]);
+    });
+
+    test('the group filter limits the list', () {
+      expect(find('', group: MuscleGroup.back), [6, 8]);
+      expect(find('dead', group: MuscleGroup.back), [6]);
+    });
+
+    test('no query puts recent and frequent first, then A to Z', () {
+      final now = DateTime(2025, 6, 1);
+      final usage = {
+        8: ExerciseUsage(2, DateTime(2025, 5, 30)),
+        6: ExerciseUsage(30, DateTime(2024, 6, 1)),
+        1: ExerciseUsage(10, DateTime(2025, 5, 20)),
+      };
+      final r = rankExercises(library, usage: usage, now: now);
+      expect(r.recent, 3);
+      expect([for (final e in r.exercises) e.id].take(3), [1, 8, 6]);
+      expect([for (final e in r.exercises.skip(3)) e.name], [
+        'Dumbbell bench press',
+        'Hammer curls',
+        'Incline press',
+        'Overhead press',
+        'Romanian deadlift',
+      ]);
+      expect(rankExercises(library, now: now).recent, 0);
+    });
+
+    test('usage breaks ties between equal matches', () {
+      final usage = {4: ExerciseUsage(5, DateTime.now())};
+      final r = rankExercises(library, query: 'press', usage: usage);
+      expect(r.exercises.first.id, 4);
+      expect(r.recent, 0);
+    });
+  });
+
+  group('rep maxes', () {
+    SetFact fact(
+      int workout,
+      int day,
+      double? kg,
+      int? reps, {
+      TrackingType type = TrackingType.weights,
+      LoadMode mode = LoadMode.none,
+    }) => SetFact(
+      workoutId: workout,
+      startedAt: DateTime(2025, 1, day),
+      exerciseId: 1,
+      type: type,
+      mode: mode,
+      loadKg: kg,
+      reps: reps,
+      bodyweightKg: 80,
+    );
+
+    test('best load per exact rep count, first date wins ties', () {
+      final r = repMaxes([
+        fact(3, 20, 100, 5),
+        fact(1, 1, 100, 5),
+        fact(2, 10, 90, 5),
+        fact(2, 10, 120, 1),
+        fact(2, 10, 60, 12),
+        fact(2, 10, 50, 13),
+        fact(2, 10, null, 5),
+        fact(2, 10, 70, null),
+        fact(2, 10, 0, 8),
+      ]);
+      expect([for (final m in r) m.reps], [1, 5, 12]);
+      expect([for (final m in r) m.loadKg], [120, 100, 60]);
+      expect(r[1].date, DateTime(2025, 1, 1));
+      expect(r[1].workoutId, 1);
+    });
+
+    test('bodyweight modes use the signed load', () {
+      const bw = TrackingType.bodyweight;
+      final added = repMaxes([
+        fact(1, 1, 0, 8, type: bw, mode: LoadMode.added),
+        fact(1, 1, 10, 8, type: bw, mode: LoadMode.added),
+        fact(1, 1, null, 3, type: bw, mode: LoadMode.added),
+      ]);
+      expect([for (final m in added) (m.reps, m.loadKg)], [(3, 0.0), (8, 10.0)]);
+      // Less assistance is better.
+      final assisted = repMaxes([
+        fact(1, 1, -30, 5, type: bw, mode: LoadMode.assisted),
+        fact(2, 2, -20, 5, type: bw, mode: LoadMode.assisted),
+      ]);
+      expect(assisted.single.loadKg, -20);
+      // Bodyweight only has nothing to compare.
+      expect(hasRepMaxes(bw, LoadMode.none), isFalse);
+      expect(hasRepMaxes(bw, LoadMode.assisted), isTrue);
+      expect(repMaxes([fact(1, 1, null, 10, type: bw)]), isEmpty);
+    });
+
+    test('warm-ups never count', () {
+      final squat = Exercise(
+        id: 1,
+        name: 'Squat',
+        muscleGroup: MuscleGroup.quads,
+        trackingType: TrackingType.weights,
+        loadMode: LoadMode.none,
+        isArchived: false,
+        createdAt: DateTime(2025),
+        equipment: Equipment.barbell,
+        perSide: false,
+        perDumbbell: false,
+        secondaryMuscles: const [],
+      );
+      final workout = Workout(
+        id: 1,
+        name: 'Legs',
+        startedAt: DateTime(2025, 1, 1),
+        totalSets: 2,
+        totalVolumeKg: 0,
+        exerciseCount: 1,
+      );
+      WorkoutSet set(int id, double kg, SetType type) => WorkoutSet(
+        id: id,
+        workoutExerciseId: 1,
+        position: id,
+        loadKg: kg,
+        reps: 5,
+        isCompleted: true,
+        setType: type,
+      );
+      final r = repMaxes(
+        sessionFacts(squat, [
+          ExerciseSession(workout, [
+            set(1, 200, SetType.warmup),
+            set(2, 100, SetType.normal),
+          ]),
+        ]),
+      );
+      expect(r.single.loadKg, 100);
     });
   });
 
@@ -454,6 +664,107 @@ void main() {
       expect(kept.perSide && kept.perDumbbell, isTrue);
       expect(kept.equipment, Equipment.dumbbell);
       expect(kept.secondaryMuscles, isEmpty);
+    });
+
+    test('changing per-side or per-dumbbell recalculates volume', () async {
+      final exercises = ExerciseRepository(db);
+      final curl = await exercises.create(
+        name: 'Curl',
+        muscleGroup: MuscleGroup.biceps,
+        trackingType: TrackingType.weights,
+        equipment: Equipment.dumbbell,
+      );
+      final row = await exercises.create(
+        name: 'Row',
+        muscleGroup: MuscleGroup.back,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      final w1 = await repo.start();
+      final (_, a) = await repo.addExercise(w1, curl.id, position: 0);
+      final (_, b) = await repo.addExercise(w1, row.id, position: 1, sets: 2);
+      await repo.writeSets([
+        done(a[0], 20, 10),
+        done(b[0], 100, 5),
+        done(b[1], 60, 5, warmup: true),
+      ]);
+      await repo.finish(w1, bodyweightKg: null);
+      final w2 = await repo.start();
+      final (_, c) = await repo.addExercise(w2, row.id, position: 0);
+      await repo.writeSets([done(c[0], 80, 5)]);
+      await repo.finish(w2, bodyweightKg: null);
+      final live = await repo.start();
+      await repo.addExercise(live, curl.id, position: 0);
+
+      Future<List<double>> volumes() async => [
+        for (final id in [w1, w2, live])
+          (await repo.load(id))!.workout.totalVolumeKg,
+      ];
+      Future<void> flags({bool? side, bool? dumbbell, String? name}) =>
+          exercises.update(
+            curl.id,
+            name: name ?? curl.name,
+            muscleGroup: curl.muscleGroup,
+            trackingType: curl.trackingType,
+            loadMode: curl.loadMode,
+            perSide: side,
+            perDumbbell: dumbbell,
+          );
+
+      expect(await volumes(), [700, 400, 0]);
+      await flags(dumbbell: true);
+      expect(await volumes(), [900, 400, 0]);
+      await flags(side: true);
+      expect(await volumes(), [1300, 400, 0]);
+      await flags(side: false, dumbbell: false);
+      expect(await volumes(), [700, 400, 0]);
+
+      // Edits that leave both flags alone don't touch the stored summary.
+      await (db.update(db.workouts)..where((w) => w.id.equals(w1))).write(
+        const WorkoutsCompanion(totalVolumeKg: Value(1)),
+      );
+      await flags(name: 'Curls');
+      expect((await volumes())[0], 1);
+
+      // A rejected edit changes nothing.
+      await expectLater(
+        flags(side: true, name: 'Row'),
+        throwsA(isA<DuplicateNameException>()),
+      );
+      expect((await exercises.getById(curl.id))!.perSide, isFalse);
+      expect((await volumes())[0], 1);
+    });
+
+    test('exercise usage counts finished sessions only', () async {
+      final exercises = ExerciseRepository(db);
+      final bench = await exercises.create(
+        name: 'Bench press',
+        muscleGroup: MuscleGroup.chest,
+        trackingType: TrackingType.weights,
+      );
+      final squat = await exercises.create(
+        name: 'Squat',
+        muscleGroup: MuscleGroup.quads,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      var last = 0;
+      for (var i = 0; i < 2; i++) {
+        last = await repo.start();
+        final (_, s) = await repo.addExercise(last, bench.id, position: 0);
+        await repo.writeSets([done(s[0], 60, 5)]);
+        await repo.finish(last, bodyweightKg: null);
+      }
+      final live = await repo.start();
+      await repo.addExercise(live, squat.id, position: 0);
+
+      final usage = await repo.watchExerciseUsage().first;
+      expect(usage.keys, [bench.id]);
+      expect(usage[bench.id]!.count, 2);
+      expect(
+        usage[bench.id]!.lastUsed,
+        (await repo.load(last))!.workout.startedAt,
+      );
     });
 
     test('writeSets stores the new set fields', () async {
