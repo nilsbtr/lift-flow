@@ -4,10 +4,13 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../data/database.dart';
 import '../data/settings_repository.dart';
+import '../domain/reminders.dart';
 import '../domain/rest.dart';
 
 /// Thin wrapper around local notifications for the workout and rest timer.
@@ -17,6 +20,8 @@ import '../domain/rest.dart';
 /// and +30 s ([_restId], times out by itself) and a scheduled alert
 /// ([_alertId]). Those actions run in [onNotificationAction]. With the app open
 /// a rest end can play a short sound instead ([playRestSound], [_soundId]).
+/// Workout reminders are weekly repeating notifications with ids 101–107
+/// ([syncReminders]), scheduled by the system so they outlive the app.
 class NotificationService {
   NotificationService() : _ready = false;
 
@@ -41,6 +46,7 @@ class NotificationService {
   final StreamController<void> _restChanges = StreamController.broadcast();
 
   bool _ready;
+  bool _zonesLoaded = false;
 
   /// Payloads of tapped notifications while the app is running.
   Stream<String?> get taps => _taps.stream;
@@ -197,6 +203,63 @@ class NotificationService {
       );
     } catch (e) {
       debugPrint('Rest sound unavailable: $e');
+    }
+  }
+
+  /// Makes the reminders match the chosen [days] (see [planReminders]) and
+  /// [minutes] after midnight. Safe to call whenever they may have changed: a
+  /// slot is replaced under its own id, and days that are off are cancelled.
+  /// Reminders are tied to the time zone they were scheduled in, so this also
+  /// runs at startup and on resume to follow a change of zone.
+  Future<void> syncReminders(int days, int minutes) async {
+    if (!_ready) return;
+    try {
+      final plan = planReminders(days, minutes);
+      for (final id in plan.cancel) {
+        await _plugin.cancel(id: id);
+      }
+      if (plan.schedule.isEmpty || !await _initZone()) return;
+      final now = tz.TZDateTime.now(tz.local);
+      final exact = await canScheduleExact();
+      for (final slot in plan.schedule) {
+        await _plugin.zonedSchedule(
+          id: slot.id,
+          title: 'Workout time',
+          body: 'Today is a training day.',
+          scheduledDate: nextReminder(now, slot),
+          androidScheduleMode: exact
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'workout_reminder',
+              'Workout reminders',
+              channelDescription: 'Weekly reminders on your training days',
+              icon: _icon,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Reminders unavailable: $e');
+    }
+  }
+
+  /// Points [tz.local] at the phone's current zone, which wall-clock
+  /// scheduling needs. Asked every time, as the phone may have travelled.
+  Future<bool> _initZone() async {
+    try {
+      if (!_zonesLoaded) {
+        tzdata.initializeTimeZones();
+        _zonesLoaded = true;
+      }
+      final zone = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(zone.identifier));
+      return true;
+    } catch (e) {
+      debugPrint('Time zone unavailable: $e');
+      return false;
     }
   }
 

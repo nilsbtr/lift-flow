@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/backup_service.dart';
 import '../../data/database.dart';
+import '../../domain/reminders.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../services/app_lock.dart';
@@ -98,6 +99,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         ],
       ),
     );
+  }
+
+  Widget _dayChip(UserSettings s, int weekday) => ChoiceChip(
+    label: Text(DateFormat.E().format(DateTime(2024, 1, weekday))),
+    selected: reminderOn(s.reminderDays, weekday),
+    onSelected: (_) => _toggleReminderDay(s, weekday),
+  );
+
+  Future<void> _toggleReminderDay(UserSettings s, int weekday) async {
+    final days = toggleReminderDay(s.reminderDays, weekday);
+    if (s.reminderDays == 0 &&
+        !await ref.read(notificationsProvider).requestPermission()) {
+      if (mounted) {
+        toast(context, 'Allow notifications in system settings for reminders');
+      }
+      return;
+    }
+    await _ctrl.setReminders(days: days);
+  }
+
+  Future<void> _editReminderTime(UserSettings s) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: s.reminderMinutes ~/ 60,
+        minute: s.reminderMinutes % 60,
+      ),
+    );
+    if (t != null) await _ctrl.setReminders(minutes: t.hour * 60 + t.minute);
   }
 
   Future<void> _export() async {
@@ -365,6 +395,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ),
             const SectionLabel('Barbell'),
             const BarbellSettings(),
+            const SectionLabel('Reminders'),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Training days', style: t.titleMedium),
+                  const SizedBox(height: Space.sm),
+                  Wrap(
+                    spacing: Space.sm,
+                    runSpacing: Space.sm,
+                    children: [
+                      for (var i = 0; i < 7; i++)
+                        _dayChip(s, (s.firstDayOfWeek - 1 + i) % 7 + 1),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              title: const Text('Reminder time'),
+              subtitle: s.reminderDays == 0
+                  ? const Text('Pick a training day first')
+                  : const Text('Local time, repeats weekly'),
+              trailing: Text(
+                TimeOfDay(
+                  hour: s.reminderMinutes ~/ 60,
+                  minute: s.reminderMinutes % 60,
+                ).format(context),
+                style: t.bodyLarge?.copyWith(
+                  color: s.reminderDays == 0 ? muted : null,
+                  fontWeight: s.reminderDays == 0 ? null : FontWeight.w600,
+                ),
+              ),
+              enabled: s.reminderDays != 0,
+              onTap: () => _editReminderTime(s),
+            ),
             const SectionLabel('Appearance'),
             _SegmentTile<ThemePref>(
               title: 'Theme',

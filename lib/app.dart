@@ -44,6 +44,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     );
     // Notifications of a killed process outlive it.
     unawaited(notifications.clear());
+    unawaited(ref.read(settingsProvider.notifier).syncReminders());
 
     unawaited(ref.read(shortcutsProvider).init(_onShortcut));
     ref.listenManual(
@@ -101,6 +102,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     ref.read(appLockProvider.notifier).onShown();
     unawaited(ref.read(notificationsProvider).clear());
     unawaited(ref.read(restTimerProvider.notifier).reload());
+    unawaited(ref.read(settingsProvider.notifier).syncReminders());
   }
 
   @override

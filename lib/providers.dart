@@ -128,6 +128,24 @@ class SettingsController extends Notifier<UserSettings> {
     await setBodyweight((await repo.latest())?.kg);
   }
 
+  /// Schedules the reminders the settings ask for. Call after anything that
+  /// may have changed them: startup, resume, a change here, an import.
+  Future<void> syncReminders() => ref
+      .read(notificationsProvider)
+      .syncReminders(state.reminderDays, state.reminderMinutes);
+
+  Future<void> setReminders({int? days, int? minutes}) async {
+    await update(
+      AppSettingsCompanion(
+        reminderDays: days == null ? const Value.absent() : Value(days),
+        reminderMinutes: minutes == null
+            ? const Value.absent()
+            : Value(minutes),
+      ),
+    );
+    await syncReminders();
+  }
+
   Future<void> markBackedUp() =>
       update(AppSettingsCompanion(lastBackupAt: Value(DateTime.now())));
 

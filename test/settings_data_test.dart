@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
@@ -12,14 +13,26 @@ import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/backup_nudge.dart';
 import 'package:lift_flow/domain/csv_export.dart';
+import 'package:lift_flow/domain/reminders.dart';
 import 'package:lift_flow/features/settings/backup_actions.dart';
 import 'package:lift_flow/features/settings/settings_screen.dart';
 import 'package:lift_flow/features/workout/workout_controller.dart';
 import 'package:lift_flow/providers.dart';
+import 'package:lift_flow/services/notifications.dart';
 import 'package:lift_flow/theme/app_theme.dart';
 import 'package:lift_flow/theme/dynamic_colors.dart';
 import 'package:lift_flow/theme/tokens.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
+
+class _FakeNotifications extends NotificationService {
+  final syncs = <(int, int)>[];
+
+  @override
+  Future<void> syncReminders(int days, int minutes) async =>
+      syncs.add((days, minutes));
+}
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -446,6 +459,196 @@ void main() {
         expect(fresh.workout.name, 'New');
         expect(await RestRepository(db).get(), isNull);
         editor.close();
+      });
+    });
+  });
+
+  group('reminders', () {
+    late tz.Location berlin;
+    late tz.Location newYork;
+    setUpAll(() {
+      tzdata.initializeTimeZones();
+      berlin = tz.getLocation('Europe/Berlin');
+      newYork = tz.getLocation('America/New_York');
+    });
+
+    test('nothing to schedule without days, and everything is cancelled', () {
+      final plan = planReminders(0, 1080);
+      expect(plan.schedule, isEmpty);
+      expect(plan.cancel, [101, 102, 103, 104, 105, 106, 107]);
+    });
+
+    test('one weekly slot per chosen day at the chosen time', () {
+      // Monday, Wednesday and Sunday at 07:05.
+      final plan = planReminders(0x1 | 0x4 | 0x40, 7 * 60 + 5);
+      expect(
+        [for (final s in plan.schedule) (s.id, s.weekday, s.hour, s.minute)],
+        [
+          (101, DateTime.monday, 7, 5),
+          (103, DateTime.wednesday, 7, 5),
+          (107, DateTime.sunday, 7, 5),
+        ],
+      );
+      expect(plan.cancel, [102, 104, 105, 106]);
+      expect(planReminders(0x7F, 0).schedule, hasLength(7));
+      expect(planReminders(0x7F, 23 * 60 + 59).schedule.first.minute, 59);
+    });
+
+    test('days are bits from Monday to Sunday', () {
+      expect(reminderOn(0x1, DateTime.monday), isTrue);
+      expect(reminderOn(0x1, DateTime.tuesday), isFalse);
+      expect(reminderOn(0x40, DateTime.sunday), isTrue);
+      var days = 0;
+      days = toggleReminderDay(days, DateTime.friday);
+      expect(days, 0x10);
+      days = toggleReminderDay(days, DateTime.friday);
+      expect(days, 0);
+    });
+
+    ({int id, int weekday, int hour, int minute}) slot(
+      int weekday,
+      int h,
+      int m,
+    ) => (id: 100 + weekday, weekday: weekday, hour: h, minute: m);
+
+    test('the first fire is the next such weekday after now', () {
+      // Wednesday 11 March 2026, 10:00.
+      final now = tz.TZDateTime(berlin, 2026, 3, 11, 10);
+      final wed = slot(DateTime.wednesday, 18, 0);
+      expect(nextReminder(now, wed), tz.TZDateTime(berlin, 2026, 3, 11, 18));
+      // The time has passed today: next week.
+      expect(
+        nextReminder(now, slot(DateTime.wednesday, 9, 30)),
+        tz.TZDateTime(berlin, 2026, 3, 18, 9, 30),
+      );
+      // Exactly now is already over.
+      expect(
+        nextReminder(now, slot(DateTime.wednesday, 10, 0)),
+        tz.TZDateTime(berlin, 2026, 3, 18, 10),
+      );
+      expect(
+        nextReminder(now, slot(DateTime.monday, 6, 0)),
+        tz.TZDateTime(berlin, 2026, 3, 16, 6),
+      );
+      // Across a month and year end.
+      final late = tz.TZDateTime(berlin, 2026, 12, 30, 12);
+      expect(
+        nextReminder(late, slot(DateTime.friday, 8, 0)),
+        tz.TZDateTime(berlin, 2027, 1, 1, 8),
+      );
+    });
+
+    test('keeps the wall-clock time across a daylight saving change', () {
+      // US clocks go forward on Sunday 8 March 2026.
+      final sat = tz.TZDateTime(newYork, 2026, 3, 7, 20);
+      final sun = nextReminder(sat, slot(DateTime.sunday, 8, 0));
+      expect((sun.day, sun.hour, sun.minute), (8, 8, 0));
+      expect(sun.timeZoneOffset, const Duration(hours: -4));
+      // Only 11 hours of real time pass between 20:00 EST and 08:00 EDT.
+      expect(sun.difference(sat), const Duration(hours: 11));
+      // The next week is back to a plain 7 days of wall-clock time.
+      final week = nextReminder(sun, slot(DateTime.sunday, 8, 0));
+      expect((week.day, week.hour), (15, 8));
+
+      // European clocks go back on Sunday 25 October 2026: 25 hours.
+      final satEu = tz.TZDateTime(berlin, 2026, 10, 24, 8);
+      final sunEu = nextReminder(satEu, slot(DateTime.sunday, 8, 0));
+      expect((sunEu.day, sunEu.hour), (25, 8));
+      expect(sunEu.timeZoneOffset, const Duration(hours: 1));
+      expect(sunEu.difference(satEu), const Duration(hours: 25));
+    });
+
+    test('the same wall-clock time lands on different instants by zone', () {
+      final inBerlin = nextReminder(
+        tz.TZDateTime(berlin, 2026, 6, 1, 0),
+        slot(DateTime.monday, 18, 0),
+      );
+      final inNewYork = nextReminder(
+        tz.TZDateTime(newYork, 2026, 6, 1, 0),
+        slot(DateTime.monday, 18, 0),
+      );
+      expect(inBerlin.hour, inNewYork.hour);
+      expect(inNewYork.difference(inBerlin), const Duration(hours: 6));
+    });
+
+    test('the manifest lets the system restore them after a reboot', () {
+      final manifest = File('android/app/src/main/AndroidManifest.xml')
+          .readAsStringSync();
+      expect(manifest, contains('android.permission.RECEIVE_BOOT_COMPLETED'));
+      expect(manifest, contains('ScheduledNotificationBootReceiver'));
+      expect(manifest, contains('android.intent.action.BOOT_COMPLETED'));
+      expect(manifest, contains('ScheduledNotificationReceiver'));
+    });
+
+    group('in the app', () {
+      late AppDatabase db;
+      late _FakeNotifications notifications;
+      setUp(() {
+        db = AppDatabase(NativeDatabase.memory());
+        notifications = _FakeNotifications();
+      });
+      tearDown(() => db.close());
+
+      Future<WidgetRef> pump(WidgetTester tester) async {
+        late WidgetRef ref;
+        await tester.runAsync(() async {
+          final settings = await SettingsRepository(db).get();
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                databaseProvider.overrideWithValue(db),
+                notificationsProvider.overrideWithValue(notifications),
+                initialSettingsProvider.overrideWithValue(settings),
+              ],
+              child: Consumer(
+                builder: (context, r, _) {
+                  ref = r;
+                  return const SizedBox();
+                },
+              ),
+            ),
+          );
+        });
+        return ref;
+      }
+
+      testWidgets('changes are saved and scheduled', (tester) async {
+        final ref = await pump(tester);
+        await tester.runAsync(() async {
+          final ctrl = ref.read(settingsProvider.notifier);
+          await ctrl.setReminders(days: 0x15);
+          await ctrl.setReminders(minutes: 420);
+          expect(notifications.syncs, [(0x15, 1080), (0x15, 420)]);
+          final s = await SettingsRepository(db).get();
+          expect((s.reminderDays, s.reminderMinutes), (0x15, 420));
+          // Turning every day off cancels them all.
+          await ctrl.setReminders(days: 0);
+          expect(notifications.syncs.last, (0, 420));
+        });
+      });
+
+      testWidgets('an import schedules what the file chose', (tester) async {
+        final ref = await pump(tester);
+        await tester.runAsync(() async {
+          final other = AppDatabase(NativeDatabase.memory());
+          await SettingsRepository(other).write(
+            const AppSettingsCompanion(
+              reminderDays: Value(0x15),
+              reminderMinutes: Value(420),
+            ),
+          );
+          final file = await BackupService(other).export();
+          await other.close();
+
+          await BackupService(db).import(file);
+          await resetAppState(ref);
+          expect(notifications.syncs.last, (0x15, 420));
+
+          // Delete-all goes back to none, which cancels the lot.
+          await BackupService(db).deleteAll();
+          await resetAppState(ref);
+          expect(notifications.syncs.last, (0, 1080));
+        });
       });
     });
   });
