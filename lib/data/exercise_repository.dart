@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../domain/records.dart';
 import 'database.dart';
 
 class DuplicateNameException implements Exception {
@@ -96,7 +97,8 @@ class ExerciseRepository {
   }
 
   /// Null [equipment], [perSide], [perDumbbell] and [secondaryMuscles] keep
-  /// the stored values.
+  /// the stored values. Changing [perSide] or [perDumbbell] recalculates the
+  /// volume of the finished workouts that contain the exercise.
   Future<void> update(
     int id, {
     required String name,
@@ -113,30 +115,84 @@ class ExerciseRepository {
     if (n.isEmpty || n.length > 60) {
       throw ArgumentError.value(name, 'name');
     }
-    if (await _nameTaken(n, exceptId: id)) throw DuplicateNameException(n);
-    final current = await getById(id);
-    if (current == null) return;
-    var type = trackingType;
-    if (type != current.trackingType && await hasLoggedSets(id)) {
-      type = current.trackingType;
+    return _db.transaction(() async {
+      if (await _nameTaken(n, exceptId: id)) throw DuplicateNameException(n);
+      final current = await getById(id);
+      if (current == null) return;
+      var type = trackingType;
+      if (type != current.trackingType && await hasLoggedSets(id)) {
+        type = current.trackingType;
+      }
+      await (_db.update(_t)..where((e) => e.id.equals(id))).write(
+        ExercisesCompanion(
+          name: Value(n),
+          muscleGroup: Value(muscleGroup),
+          trackingType: Value(type),
+          loadMode: Value(
+            type == TrackingType.weights ? LoadMode.none : loadMode,
+          ),
+          notes: Value(_cleanNotes(notes)),
+          equipment: Value.absentIfNull(equipment),
+          perSide: Value.absentIfNull(perSide),
+          perDumbbell: Value.absentIfNull(perDumbbell),
+          secondaryMuscles: Value(
+            _secondary(
+              secondaryMuscles ?? current.secondaryMuscles,
+              muscleGroup,
+            ),
+          ),
+        ),
+      );
+      if ((perSide ?? current.perSide) != current.perSide ||
+          (perDumbbell ?? current.perDumbbell) != current.perDumbbell) {
+        await _recomputeVolumes(id);
+      }
+    });
+  }
+
+  /// Rewrites [Workouts.totalVolumeKg] of the finished workouts containing
+  /// [exerciseId] from their completed working sets.
+  Future<void> _recomputeVolumes(int exerciseId) async {
+    final w = _db.workouts;
+    final we = _db.workoutExercises;
+    final s = _db.workoutSets;
+    final ids =
+        await (_db.selectOnly(we)
+              ..addColumns([we.workoutId])
+              ..where(we.exerciseId.equals(exerciseId)))
+            .map((r) => r.read(we.workoutId)!)
+            .get();
+    final workouts = await (_db.select(
+      w,
+    )..where((x) => x.id.isIn(ids) & x.endedAt.isNotNull())).get();
+    for (final workout in workouts) {
+      final rows =
+          await (_db.select(s).join([
+                innerJoin(we, we.id.equalsExp(s.workoutExerciseId)),
+                innerJoin(_t, _t.id.equalsExp(we.exerciseId)),
+              ])..where(
+                we.workoutId.equals(workout.id) &
+                    s.isCompleted &
+                    s.setType.equalsValue(SetType.warmup).not(),
+              ))
+              .get();
+      var volume = 0.0;
+      for (final r in rows) {
+        final e = r.readTable(_t);
+        final set = r.readTable(s);
+        volume += setVolume(
+          type: e.trackingType,
+          loadKg: set.loadKg,
+          reps: set.reps,
+          bodyweightKg: workout.bodyweightKg,
+          perSide: e.perSide,
+          perDumbbell: e.perDumbbell,
+        );
+      }
+      await (_db.update(w)..where((x) => x.id.equals(workout.id))).write(
+        WorkoutsCompanion(totalVolumeKg: Value(volume)),
+      );
     }
-    await (_db.update(_t)..where((e) => e.id.equals(id))).write(
-      ExercisesCompanion(
-        name: Value(n),
-        muscleGroup: Value(muscleGroup),
-        trackingType: Value(type),
-        loadMode: Value(
-          type == TrackingType.weights ? LoadMode.none : loadMode,
-        ),
-        notes: Value(_cleanNotes(notes)),
-        equipment: Value.absentIfNull(equipment),
-        perSide: Value.absentIfNull(perSide),
-        perDumbbell: Value.absentIfNull(perDumbbell),
-        secondaryMuscles: Value(
-          _secondary(secondaryMuscles ?? current.secondaryMuscles, muscleGroup),
-        ),
-      ),
-    );
   }
 
   Future<bool> hasLoggedSets(int exerciseId) async {
