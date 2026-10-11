@@ -5,16 +5,24 @@ import '../data/database.dart';
 
 /// Long-press shortcuts on the launcher icon that start a template.
 class ShortcutService {
-  ShortcutService([QuickActions actions = const QuickActions()])
-    : _actions = actions;
+  ShortcutService([
+    QuickActions actions = const QuickActions(),
+    DateTime Function() clock = DateTime.now,
+  ]) : _actions = actions,
+       _clock = clock;
 
   final QuickActions _actions;
+  final DateTime Function() _clock;
 
   static const _prefix = 'template:';
   static const _icon = 'ic_shortcut_workout';
+  static const _repeatWindow = Duration(seconds: 3);
 
   /// What the launcher currently shows, to skip no-op updates.
   List<String>? _shown;
+
+  String? _lastTap;
+  DateTime? _lastTapAt;
 
   static String typeFor(int templateId) => '$_prefix$templateId';
 
@@ -31,11 +39,26 @@ class ShortcutService {
     try {
       await _actions.initialize((type) {
         final id = templateIdOf(type);
-        if (id != null) onTemplate(id);
+        if (id != null && !_isRepeat(type)) onTemplate(id);
       });
     } catch (e) {
       debugPrint('Shortcuts unavailable: $e');
     }
+  }
+
+  /// A launch that creates the activity reaches Dart twice (as the launch
+  /// action and as the new-intent callback), which would start it twice.
+  bool _isRepeat(String type) {
+    final now = _clock();
+    final last = _lastTapAt;
+    if (type == _lastTap &&
+        last != null &&
+        now.difference(last) < _repeatWindow) {
+      return true;
+    }
+    _lastTap = type;
+    _lastTapAt = now;
+    return false;
   }
 
   /// Makes [templates] the launcher's shortcuts, in order.

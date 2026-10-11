@@ -112,12 +112,14 @@ void main() {
   group('ShortcutService', () {
     late FakeQuickActions actions;
     late ShortcutService service;
+    var now = day;
 
     setUp(() {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       actions = FakeQuickActions();
-      service = ShortcutService(actions);
+      now = day;
+      service = ShortcutService(actions, () => now);
     });
 
     test('shortcut types round-trip to template ids', () {
@@ -133,6 +135,22 @@ void main() {
       actions.handler!('template:7');
       actions.handler!('something else');
       expect(taps, [7]);
+    });
+
+    test('a launch that reaches Dart twice starts the template once', () async {
+      final taps = <int>[];
+      await service.init(taps.add);
+
+      actions.handler!('template:7'); // The launch action...
+      actions.handler!('template:7'); // ...and the new-intent callback.
+      expect(taps, [7]);
+
+      actions.handler!('template:8');
+      expect(taps, [7, 8]);
+
+      now = now.add(const Duration(seconds: 4));
+      actions.handler!('template:8'); // A real second tap.
+      expect(taps, [7, 8, 8]);
     });
 
     test('publishes in order and skips unchanged lists', () async {
