@@ -7,12 +7,14 @@ import '../../data/workout_repository.dart';
 import '../../domain/records.dart';
 import '../../domain/stats.dart';
 import '../../domain/units.dart';
+import '../../domain/workout_name.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/charts/sparkline.dart';
 import '../../widgets/common.dart';
+import 'trophy_burst.dart';
 
 /// Shown after finishing a workout.
 class FinishSummarySheet extends ConsumerStatefulWidget {
@@ -30,7 +32,7 @@ class _FinishSummarySheetState extends ConsumerState<FinishSummarySheet> {
     final name = await promptText(
       context,
       title: 'Save as template',
-      initial: w.workout.name == 'Workout' ? '' : w.workout.name,
+      initial: w.workout.name == kDefaultWorkoutName ? '' : w.workout.name,
       hint: 'Name, e.g. Push',
       action: 'Save',
     );
@@ -39,6 +41,17 @@ class _FinishSummarySheetState extends ConsumerState<FinishSummarySheet> {
     final items = await repo.itemsFromWorkout(widget.workoutId);
     await repo.save(name: name, items: items);
     if (mounted) setState(() => _savedTemplate = true);
+  }
+
+  Future<void> _rename(Workout w) async {
+    final name = await promptText(
+      context,
+      title: 'Rename workout',
+      initial: w.name,
+      action: 'Save',
+    );
+    if (name == null || name.isEmpty) return;
+    await ref.read(workoutRepoProvider).rename(w.id, name);
   }
 
   Future<void> _updateTemplate(int templateId) async {
@@ -72,6 +85,7 @@ class _FinishSummarySheetState extends ConsumerState<FinishSummarySheet> {
       for (final ex in loaded.exercises)
         if (insights?.lifts[ex.exercise.id] case final l?) (ex.exercise, l),
     ];
+    final records = lifts.fold(0, (n, l) => n + l.$2.prs.length);
 
     return SafeArea(
       top: false,
@@ -81,19 +95,49 @@ class _FinishSummarySheetState extends ConsumerState<FinishSummarySheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            AppIcon(AppIcons.checkSolid, color: lift.done, size: IconSizes.lg),
+            if (records > 0)
+              const Center(child: TrophyBurst())
+            else
+              Center(
+                child: AppIcon(
+                  AppIcons.checkSolid,
+                  color: lift.done,
+                  size: IconSizes.lg,
+                ),
+              ),
             const SizedBox(height: Space.sm),
             Text(
               'Workout complete',
               style: t.headlineSmall,
               textAlign: TextAlign.center,
             ),
-            Text(
-              w.name,
-              style: t.bodyMedium?.copyWith(color: lift.muted),
-              textAlign: TextAlign.center,
+            if (records > 0)
+              Text(
+                '$records new ${records == 1 ? 'record' : 'records'}',
+                style: t.bodyMedium?.copyWith(color: lift.record),
+                textAlign: TextAlign.center,
+              ),
+            Center(
+              child: Tooltip(
+                message: 'Rename workout',
+                child: TextButton.icon(
+                  onPressed: () => _rename(w),
+                  icon: AppIcon(
+                    AppIcons.edit,
+                    size: IconSizes.xs,
+                    color: lift.muted,
+                  ),
+                  iconAlignment: IconAlignment.end,
+                  label: Text(
+                    w.name,
+                    style: t.bodyMedium?.copyWith(color: lift.muted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(height: Space.lg),
+            const SizedBox(height: Space.md),
             Row(
               children: [
                 _Metric(
