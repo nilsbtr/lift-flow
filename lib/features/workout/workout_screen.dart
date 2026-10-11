@@ -712,7 +712,9 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                       children: [
                         Text(
                           ex.exercise.name,
-                          style: t.titleMedium?.copyWith(color: scheme.primary),
+                          style: t.titleMedium?.copyWith(
+                            color: scheme.primary,
+                          ),
                         ),
                         if (superset != null)
                           Padding(
