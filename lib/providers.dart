@@ -16,9 +16,11 @@ import 'data/workout_repository.dart';
 import 'domain/exercise_search.dart';
 import 'domain/records.dart';
 import 'domain/rest.dart';
+import 'domain/shortcuts.dart';
 import 'domain/stats.dart';
 import 'services/app_lock.dart';
 import 'services/notifications.dart';
+import 'services/shortcuts.dart';
 
 // ------------------------------------------------------------ infrastructure
 
@@ -28,6 +30,10 @@ final databaseProvider = Provider<AppDatabase>(
 
 final notificationsProvider = Provider<NotificationService>(
   (ref) => NotificationService(),
+);
+
+final shortcutsProvider = Provider<ShortcutService>(
+  (ref) => ShortcutService(),
 );
 
 /// Overridden in tests; the app asks the device itself.
@@ -351,6 +357,17 @@ final liveWorkoutProvider = Provider<Workout?>((ref) {
 
 /// Live workouts already asked about being forgotten in this app session.
 final forgottenAskedProvider = Provider<Set<int>>((ref) => {});
+
+/// Templates offered as launcher shortcuts, most recently used first.
+final shortcutTemplatesProvider = Provider<List<WorkoutTemplate>>((ref) {
+  final templates = ref.watch(templatesProvider).value ?? const [];
+  final history = ref.watch(historyProvider).value ?? const <Workout>[];
+  final live = ref.watch(liveWorkoutProvider);
+  return shortcutTemplates(
+    [for (final d in templates) d.template],
+    [?live, ...history],
+  );
+});
 
 // ------------------------------------------------------------ rest timer
 
