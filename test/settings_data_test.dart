@@ -13,8 +13,12 @@ import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/backup_nudge.dart';
 import 'package:lift_flow/domain/csv_export.dart';
 import 'package:lift_flow/features/settings/backup_actions.dart';
+import 'package:lift_flow/features/settings/settings_screen.dart';
 import 'package:lift_flow/features/workout/workout_controller.dart';
 import 'package:lift_flow/providers.dart';
+import 'package:lift_flow/theme/app_theme.dart';
+import 'package:lift_flow/theme/dynamic_colors.dart';
+import 'package:lift_flow/theme/tokens.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
@@ -443,6 +447,140 @@ void main() {
         expect(await RestRepository(db).get(), isNull);
         editor.close();
       });
+    });
+  });
+
+  group('Material You', () {
+    double hueGap(Color a, Color b) {
+      final d = (HSLColor.fromColor(a).hue - HSLColor.fromColor(b).hue).abs();
+      return d > 180 ? 360 - d : d;
+    }
+
+    double contrast(Color a, Color b) {
+      final la = a.computeLuminance();
+      final lb = b.computeLuminance();
+      return (la > lb ? la + 0.05 : lb + 0.05) /
+          (la > lb ? lb + 0.05 : la + 0.05);
+    }
+
+    test('ensureContrast leaves legible colors alone and fixes the rest', () {
+      const white = Color(0xFFFFFFFF);
+      expect(ensureContrast(Palette.lightGreen, [white]), Palette.lightGreen);
+      const pale = Color(0xFFBFE8CF);
+      final fixed = ensureContrast(pale, [white], min: 3);
+      expect(contrast(fixed, white), greaterThanOrEqualTo(3));
+      // Dark surfaces push the other way.
+      const dark = Color(0xFF121416);
+      final lifted = ensureContrast(const Color(0xFF204030), [dark], min: 3);
+      expect(contrast(lifted, dark), greaterThanOrEqualTo(3));
+      expect(lifted.computeLuminance(), greaterThan(0.05));
+    });
+
+    for (final seed in [
+      Colors.red,
+      Colors.orange,
+      Colors.yellow,
+      Colors.green,
+      Colors.teal,
+      Colors.blue,
+      Colors.purple,
+      Colors.pink,
+    ]) {
+      for (final brightness in Brightness.values) {
+        for (final black in [false, true]) {
+          if (black && brightness == Brightness.light) continue;
+          test('done, rest and record stay legible: $seed $brightness '
+              '${black ? 'black' : ''}', () {
+            final d = ColorScheme.fromSeed(
+              seedColor: seed,
+              brightness: brightness,
+            );
+            final theme = AppTheme.dynamicTheme(d, pureBlack: black);
+            final lift = theme.extension<LiftColors>()!;
+            final scheme = theme.colorScheme;
+            expect(scheme.primary, d.primary);
+            expect(
+              theme.scaffoldBackgroundColor,
+              black ? Colors.black : d.surface,
+            );
+            final pal = brightness == Brightness.dark
+                ? [Palette.darkGreen, Palette.darkYellow, Palette.darkViolet]
+                : [
+                    Palette.lightGreen,
+                    Palette.lightYellow,
+                    Palette.lightViolet,
+                  ];
+            final got = [lift.done, lift.rest, lift.record];
+            for (var i = 0; i < 3; i++) {
+              // Same family of color, so a legend still reads the same.
+              expect(hueGap(got[i], pal[i]), lessThan(40), reason: '$i');
+              for (final bg in [scheme.surface, lift.raised]) {
+                expect(contrast(got[i], bg), greaterThanOrEqualTo(3));
+              }
+            }
+            expect(contrast(scheme.error, scheme.surface), greaterThan(3));
+            expect(contrast(lift.muted, scheme.surface), greaterThan(3));
+            expect(contrast(scheme.onSurface, scheme.surface), greaterThan(7));
+          });
+        }
+      }
+    }
+
+    test('the palette stays the default and is unchanged', () {
+      final lift = AppTheme.light().extension<LiftColors>()!;
+      expect(lift.done, Palette.lightGreen);
+      expect(AppTheme.dark().colorScheme.primary, Palette.darkBlue);
+    });
+
+    test('there are no system colors without the plugin', () async {
+      expect(await loadDynamicSchemes(), isNull);
+    });
+
+    Future<void> pumpSettings(
+      WidgetTester tester,
+      AppDatabase db,
+      DynamicSchemes? schemes,
+    ) async {
+      await tester.runAsync(() async {
+        final settings = await SettingsRepository(db).get();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              databaseProvider.overrideWithValue(db),
+              initialSettingsProvider.overrideWithValue(settings),
+              dynamicSchemesProvider.overrideWithValue(schemes),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.light(),
+              home: const SettingsScreen(),
+            ),
+          ),
+        );
+        await tester.pump();
+      });
+    }
+
+    testWidgets('the switch is only offered where the system has colors', (
+      tester,
+    ) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(() => tester.runAsync(db.close));
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(800, 3000);
+      addTearDown(tester.view.reset);
+
+      await pumpSettings(tester, db, null);
+      expect(find.text('Material You'), findsNothing);
+      expect(find.text('Pure black'), findsOneWidget);
+
+      await pumpSettings(tester, db, (
+        light: ColorScheme.fromSeed(seedColor: Colors.green),
+        dark: ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: Brightness.dark,
+        ),
+      ));
+      expect(find.text('Material You'), findsOneWidget);
     });
   });
 }

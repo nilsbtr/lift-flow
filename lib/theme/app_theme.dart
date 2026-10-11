@@ -1,3 +1,4 @@
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -52,6 +53,26 @@ class LiftColors extends ThemeExtension<LiftColors> {
   }
 }
 
+/// Nudges [c] toward black or white until it reaches [min] contrast against
+/// every one of [backgrounds]. Colors that already do are returned as they are.
+Color ensureContrast(Color c, List<Color> backgrounds, {double min = 4.5}) {
+  double ratio(Color a, Color b) {
+    final la = a.computeLuminance();
+    final lb = b.computeLuminance();
+    return (la > lb ? la + 0.05 : lb + 0.05) /
+        (la > lb ? lb + 0.05 : la + 0.05);
+  }
+
+  final toward = backgrounds.first.computeLuminance() > 0.5
+      ? Colors.black
+      : Colors.white;
+  var out = c;
+  for (var i = 0; i < 20 && backgrounds.any((b) => ratio(out, b) < min); i++) {
+    out = Color.lerp(out, toward, 0.08)!;
+  }
+  return out;
+}
+
 abstract final class AppTheme {
   static ThemeData light() => _build(
     brightness: Brightness.light,
@@ -83,6 +104,44 @@ abstract final class AppTheme {
     red: Palette.darkRed,
   );
 
+  /// The theme on the system's dynamic colors [d] (Material You). Surfaces,
+  /// text and the accent come from [d]; done, rest and record keep their
+  /// palette hues, nudged toward the accent and kept legible on the surfaces.
+  static ThemeData dynamicTheme(ColorScheme d, {bool pureBlack = false}) {
+    final dark = d.brightness == Brightness.dark;
+    final black = dark && pureBlack;
+    Color tint(Color c, double t) => Color.lerp(Colors.black, c, t)!;
+    final background = black ? Colors.black : d.surface;
+    final surface = black
+        ? tint(d.surfaceContainerLow, 0.6)
+        : dark
+        ? d.surfaceContainerLow
+        : d.surfaceContainerLowest;
+    final raised = black
+        ? tint(d.surfaceContainerHigh, 0.6)
+        : d.surfaceContainerHigh;
+    Color semantic(Color palette) => ensureContrast(
+      palette.harmonizeWith(d.primary),
+      [surface, raised],
+      min: 3,
+    );
+    return _build(
+      brightness: d.brightness,
+      background: background,
+      surface: surface,
+      raised: raised,
+      outline: d.outlineVariant,
+      text: d.onSurface,
+      muted: d.onSurfaceVariant,
+      blue: d.primary,
+      green: semantic(dark ? Palette.darkGreen : Palette.lightGreen),
+      yellow: semantic(dark ? Palette.darkYellow : Palette.lightYellow),
+      violet: semantic(dark ? Palette.darkViolet : Palette.lightViolet),
+      red: ensureContrast(d.error, [surface, raised], min: 3),
+      onAccent: d.onPrimary,
+    );
+  }
+
   static ThemeData _build({
     required Brightness brightness,
     required Color background,
@@ -96,9 +155,10 @@ abstract final class AppTheme {
     required Color yellow,
     required Color violet,
     required Color red,
+    Color? onAccent,
   }) {
     final isDark = brightness == Brightness.dark;
-    final onAccent = isDark ? Palette.darkBackground : Colors.white;
+    onAccent ??= isDark ? Palette.darkBackground : Colors.white;
 
     final scheme = ColorScheme(
       brightness: brightness,

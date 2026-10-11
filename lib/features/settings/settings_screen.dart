@@ -374,6 +374,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onChanged: (v) =>
                   _ctrl.update(AppSettingsCompanion(themeMode: Value(v))),
             ),
+            if (ref.watch(dynamicSchemesProvider) != null)
+              SwitchListTile(
+                title: const Text('Material You'),
+                subtitle: const Text('Use your wallpaper colors'),
+                value: s.dynamicColor,
+                onChanged: (v) =>
+                    _ctrl.update(AppSettingsCompanion(dynamicColor: Value(v))),
+              ),
             SwitchListTile(
               title: const Text('Pure black'),
               subtitle: const Text('Dark theme on a black background'),

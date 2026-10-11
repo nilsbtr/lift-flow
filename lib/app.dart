@@ -123,12 +123,19 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     final live = ref.watch(liveWorkoutProvider);
     final router = ref.watch(routerProvider);
     _syncWakelock(settings.keepScreenOn && live != null);
+    final system = settings.dynamicColor
+        ? ref.watch(dynamicSchemesProvider)
+        : null;
 
     return MaterialApp.router(
       title: 'Lift Flow',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(pureBlack: settings.pureBlack),
+      theme: system == null
+          ? AppTheme.light()
+          : AppTheme.dynamicTheme(system.light),
+      darkTheme: system == null
+          ? AppTheme.dark(pureBlack: settings.pureBlack)
+          : AppTheme.dynamicTheme(system.dark, pureBlack: settings.pureBlack),
       themeMode: switch (settings.themeMode) {
         ThemePref.system => ThemeMode.system,
         ThemePref.light => ThemeMode.light,

@@ -21,6 +21,7 @@ import 'domain/stats.dart';
 import 'services/app_lock.dart';
 import 'services/notifications.dart';
 import 'services/shortcuts.dart';
+import 'theme/dynamic_colors.dart';
 
 // ------------------------------------------------------------ infrastructure
 
@@ -48,6 +49,9 @@ final initialSettingsProvider = Provider<UserSettings>(
 final initialLiveWorkoutProvider = Provider<Workout?>((ref) => null);
 
 final initialRestProvider = Provider<RestStateRow?>((ref) => null);
+
+/// System colors, preloaded in main.dart. Null where the system has none.
+final dynamicSchemesProvider = Provider<DynamicSchemes?>((ref) => null);
 
 /// Overridden in main.dart; the fallback keeps tests that skip the override working.
 final initialPackageInfoProvider = Provider<PackageInfo>(
