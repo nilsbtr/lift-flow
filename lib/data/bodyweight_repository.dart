@@ -28,6 +28,14 @@ class BodyweightRepository {
         ),
       );
 
+  /// Moves the entry of the local day [from] to the day of [to] with a new
+  /// [kg], replacing any entry already there.
+  Future<void> move(DateTime from, DateTime to, double kg) =>
+      _db.transaction(() async {
+        await delete(DateTime(from.year, from.month, from.day));
+        await upsertDay(to, kg);
+      });
+
   Future<void> delete(DateTime date) =>
       (_db.delete(_b)..where((b) => b.date.equals(date))).go();
 }

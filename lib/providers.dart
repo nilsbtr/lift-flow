@@ -88,10 +88,21 @@ class SettingsController extends Notifier<UserSettings> {
   Future<void> setBodyweight(double? kg) =>
       update(AppSettingsCompanion(bodyweightKg: Value(kg)));
 
-  /// Logs today's body weight and makes it the current value.
-  Future<void> logBodyweight(double kg) async {
-    await ref.read(bodyweightRepoProvider).upsertDay(DateTime.now(), kg);
-    await setBodyweight(kg);
+  /// Logs a weigh-in for [date] (today by default, never later), or moves the
+  /// entry of the day [replacing] there. The current value is always that of
+  /// the latest-dated entry.
+  Future<void> logBodyweight(
+    double kg, {
+    DateTime? date,
+    DateTime? replacing,
+  }) async {
+    final repo = ref.read(bodyweightRepoProvider);
+    final now = DateTime.now();
+    final day = date == null || date.isAfter(now) ? now : date;
+    await (replacing == null
+        ? repo.upsertDay(day, kg)
+        : repo.move(replacing, day, kg));
+    await setBodyweight((await repo.latest())?.kg);
   }
 
   /// Deletes an entry; the current value falls back to the latest remaining.

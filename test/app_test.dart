@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show OrderingTerm, Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1937,6 +1937,60 @@ void main() {
       expect(container.read(settingsProvider).bodyweightKg, 79);
       await ctrl.deleteBodyweightEntry(DateTime(2025, 1, 1));
       expect(container.read(settingsProvider).bodyweightKg, isNull);
+    });
+
+    test('backdated weigh-ins keep the latest day as the current value', () async {
+      final container = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          initialSettingsProvider.overrideWithValue(
+            await SettingsRepository(db).get(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final ctrl = container.read(settingsProvider.notifier);
+      double? current() => container.read(settingsProvider).bodyweightKg;
+      Future<List<(DateTime, double)>> entries() async => [
+        for (final e in await (db.select(db.bodyweightEntries)
+              ..orderBy([(b) => OrderingTerm.asc(b.date)]))
+            .get())
+          (e.date, e.kg),
+      ];
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = DateTime(now.year, now.month, now.day - 1);
+      final older = DateTime(now.year, now.month, now.day - 3);
+
+      await ctrl.logBodyweight(80);
+      await ctrl.logBodyweight(79, date: yesterday);
+      expect(current(), 80);
+
+      // Editing an entry can move it to another day.
+      await ctrl.logBodyweight(78, date: older, replacing: yesterday);
+      expect(await entries(), [(older, 78.0), (today, 80.0)]);
+      expect(current(), 80);
+
+      // Editing the latest entry changes the current value.
+      await ctrl.logBodyweight(81, date: today, replacing: today);
+      expect(current(), 81);
+
+      // Moving onto a day with an entry replaces it.
+      await ctrl.logBodyweight(77, date: older, replacing: today);
+      expect(await entries(), [(older, 77.0)]);
+      expect(current(), 77);
+
+      // Future dates count as today.
+      await ctrl.logBodyweight(82, date: today.add(const Duration(days: 5)));
+      expect(await entries(), [(older, 77.0), (today, 82.0)]);
+      expect(current(), 82);
+
+      // Undoing a delete puts the entry back.
+      await ctrl.deleteBodyweightEntry(today);
+      expect(current(), 77);
+      await ctrl.logBodyweight(82, date: today);
+      expect(await entries(), [(older, 77.0), (today, 82.0)]);
+      expect(current(), 82);
     });
 
     test('workout insights compare with the last session', () async {

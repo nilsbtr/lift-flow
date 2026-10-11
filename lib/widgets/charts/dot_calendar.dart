@@ -15,6 +15,7 @@ class DotCalendar extends StatelessWidget {
     required this.now,
     required this.semanticLabel,
     this.firstDay = DateTime.monday,
+    this.labelBuilder,
     this.onTapDay,
   });
 
@@ -24,6 +25,10 @@ class DotCalendar extends StatelessWidget {
 
   /// [DateTime.monday] … [DateTime.sunday].
   final int firstDay;
+
+  /// Builds the label from the number of weeks actually shown (4–26 by
+  /// width), overriding [semanticLabel].
+  final String Function(int weeks)? labelBuilder;
 
   /// Called for training days only.
   final ValueChanged<DateTime>? onTapDay;
@@ -36,20 +41,20 @@ class DotCalendar extends StatelessWidget {
     final style = ChartStyle.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     final labelH = scaler.scale(style.label.fontSize!) * style.label.height!;
-    return ChartSemantics(
-      label: semanticLabel,
-      child: LayoutBuilder(
-        builder: (context, c) {
-          final w = c.maxWidth;
-          final weeks = ((w + _gap) / (_target + _gap)).floor().clamp(4, 26);
-          final cell = (w + _gap) / weeks - _gap;
-          final layout = _Layout(
-            first: addDays(weekStart(now, firstDay), -7 * (weeks - 1)),
-            weeks: weeks,
-            cell: cell,
-            top: labelH + _gap * 2,
-          );
-          return GestureDetector(
+    return LayoutBuilder(
+      builder: (context, c) {
+        final w = c.maxWidth;
+        final weeks = ((w + _gap) / (_target + _gap)).floor().clamp(4, 26);
+        final cell = (w + _gap) / weeks - _gap;
+        final layout = _Layout(
+          first: addDays(weekStart(now, firstDay), -7 * (weeks - 1)),
+          weeks: weeks,
+          cell: cell,
+          top: labelH + _gap * 2,
+        );
+        return ChartSemantics(
+          label: labelBuilder?.call(weeks) ?? semanticLabel,
+          child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapUp: onTapDay == null
                 ? null
@@ -67,9 +72,9 @@ class DotCalendar extends StatelessWidget {
                 scaler: scaler,
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

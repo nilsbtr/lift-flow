@@ -13,12 +13,40 @@ final statFactsProvider = StreamProvider.autoDispose<List<SetFact>>(
       .watchStatFacts(addDays(dayOf(DateTime.now()), -180)),
 );
 
-final muscleBalanceProvider = Provider.autoDispose<Map<MuscleGroup, double>?>(
-  (ref) => switch (ref.watch(statFactsProvider).value) {
-    final facts? => setsPerMuscle(facts, now: DateTime.now()),
-    null => null,
-  },
-);
+/// Average working sets per week, over [weeks] weeks of data.
+class MuscleBalance {
+  const MuscleBalance(this.sets, this.weeks);
+  final Map<MuscleGroup, double> sets;
+  final int weeks;
+}
+
+final muscleBalanceProvider = Provider.autoDispose<MuscleBalance?>((ref) {
+  final facts = ref.watch(statFactsProvider).value;
+  if (facts == null) return null;
+  final history = ref.watch(historyProvider).value ?? const <Workout>[];
+  final now = DateTime.now();
+  // New users have less than 4 weeks of data to average over.
+  final first =
+      history.map((w) => w.startedAt).minOrNull ??
+      facts.map((f) => f.startedAt).minOrNull;
+  return MuscleBalance(
+    setsPerMuscle(facts, now: now, since: first),
+    balanceWeeks(first, now),
+  );
+});
+
+/// Every PR of the active exercises, newest first. Records need an earlier
+/// best, so this looks at all history, not just the last 180 days.
+final prHistoryProvider = FutureProvider.autoDispose<List<PrEvent>>((
+  ref,
+) async {
+  await ref.watch(historyProvider.future);
+  final exercises = await ref.watch(exercisesProvider.future);
+  final facts = await ref.read(workoutRepoProvider).setFacts([
+    for (final e in exercises) e.id,
+  ]);
+  return prHistory(facts);
+});
 
 class TopLift {
   const TopLift(this.exercise, this.metric, this.series);
