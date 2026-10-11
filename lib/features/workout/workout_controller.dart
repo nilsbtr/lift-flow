@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/misc.dart' show KeepAliveLink;
 
 import '../../data/database.dart';
 import '../../data/workout_repository.dart';
+import '../../domain/records.dart';
 import '../../providers.dart';
 
 @immutable
@@ -16,6 +17,7 @@ class DraftExercise {
     required this.exercise,
     required this.sets,
     required this.previous,
+    this.bests,
     this.repsMin,
     this.repsMax,
     this.restSeconds,
@@ -28,6 +30,9 @@ class DraftExercise {
 
   /// Completed sets of the last session of this exercise.
   final List<WorkoutSet> previous;
+
+  /// Bests from before this workout. Null without earlier history.
+  final ExerciseBests? bests;
   final int? repsMin;
   final int? repsMax;
 
@@ -40,6 +45,7 @@ class DraftExercise {
         exercise: exercise ?? this.exercise,
         sets: sets ?? this.sets,
         previous: previous,
+        bests: bests,
         repsMin: repsMin,
         repsMax: repsMax,
         restSeconds: restSeconds,
@@ -82,6 +88,49 @@ class DraftExercise {
     reps ??= repsMin;
     return (load: hasLoad ? load : null, reps: reps);
   }
+
+  /// Records by set id: completed working sets that beat [bests] and the sets
+  /// above them. [bodyweightKg] is the body weight of this workout.
+  Map<int, Set<PrKind>> records(double? bodyweightKg) {
+    final before = bests;
+    if (before == null) return const {};
+    final kinds = liveRecords(before, [
+      for (final s in sets)
+        s.isCompleted && !s.setType.isWarmup
+            ? SetFact(
+                workoutId: 0,
+                startedAt: DateTime(0),
+                exerciseId: exercise.id,
+                type: type,
+                mode: mode,
+                loadKg: s.loadKg,
+                reps: s.reps,
+                bodyweightKg: bodyweightKg,
+              )
+            : null,
+    ]);
+    return {
+      for (final (i, k) in kinds.indexed)
+        if (k.isNotEmpty) sets[i].id: k,
+    };
+  }
+}
+
+enum SetField { load, reps }
+
+/// Where typing continues once the set at [index] is completed: the next open
+/// set, in its load field if that is empty and in reps otherwise. Null after
+/// the last set.
+({int setId, SetField field})? nextField(DraftExercise ex, int index) {
+  if (index >= ex.sets.length || !ex.sets[index].isCompleted) return null;
+  for (final s in ex.sets.skip(index + 1)) {
+    if (s.isCompleted) continue;
+    return (
+      setId: s.id,
+      field: ex.hasLoad && s.loadKg == null ? SetField.load : SetField.reps,
+    );
+  }
+  return null;
 }
 
 @immutable
@@ -104,6 +153,8 @@ class WorkoutDraft {
     0,
     (n, e) => n + e.sets.where((s) => s.isCompleted).length,
   );
+
+  int get totalSets => exercises.fold(0, (n, e) => n + e.sets.length);
 
   DraftExercise? byId(int id) {
     for (final e in exercises) {
@@ -135,23 +186,33 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   Timer? _debounce;
   final Map<int, WorkoutSet> _dirty = {};
 
+  /// A removed set that [undoDelete] can still bring back.
+  ({int exerciseId, int index, WorkoutSet set, Completer<void> settled})?
+  _pending;
+
   static const _debounceDelay = Duration(milliseconds: 400);
 
   @override
   Future<WorkoutDraft> build() async {
     _repo = ref.read(workoutRepoProvider);
-    _lifecycle = AppLifecycleListener(onPause: flush, onHide: flush);
+    _lifecycle = AppLifecycleListener(onPause: _settle, onHide: _settle);
     ref.onDispose(() {
       _lifecycle?.dispose();
       _debounce?.cancel();
+      unawaited(commitDelete());
       unawaited(_writeDirty());
     });
 
     final loaded = await _repo.load(workoutId);
     if (loaded == null) throw StateError('Workout $workoutId not found');
     final w = loaded.workout;
+    final bests = bestsBefore(
+      await _repo.setFacts(loaded.exercises.map((e) => e.exercise.id)),
+      w.id,
+      w.startedAt,
+    );
     final exercises = await Future.wait([
-      for (final e in loaded.exercises) _toDraft(e, w),
+      for (final e in loaded.exercises) _toDraft(e, w, bests[e.exercise.id]),
     ]);
     if (w.endedAt == null) _keepAlive = ref.keepAlive();
     return WorkoutDraft(
@@ -161,7 +222,11 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     );
   }
 
-  Future<DraftExercise> _toDraft(LoadedExercise e, Workout w) async {
+  Future<DraftExercise> _toDraft(
+    LoadedExercise e,
+    Workout w,
+    ExerciseBests? bests,
+  ) async {
     final previous = await _repo.previousSets(
       e.exercise.id,
       excludeWorkoutId: w.id,
@@ -172,6 +237,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       exercise: e.exercise,
       sets: e.sets,
       previous: previous,
+      bests: bests,
       repsMin: e.row.targetRepsMin,
       repsMax: e.row.targetRepsMax,
       restSeconds: e.row.restSeconds,
@@ -227,14 +293,28 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     _debounce = Timer(_debounceDelay, flush);
   }
 
-  void toggleWarmup(int exerciseId, int setId) {
+  /// [rpe] is RPE 1–10 in 0.5 steps, also when it is entered as RIR.
+  void setRpe(int exerciseId, int setId, double? rpe) {
     final s = _set(exerciseId, setId);
+    if (s == null || s.rpe == rpe) return;
+    _edit(exerciseId, s.copyWith(rpe: Value(rpe)));
+  }
+
+  void setType(int exerciseId, int setId, SetType type) {
+    final s = _set(exerciseId, setId);
+    if (s == null || s.setType == type) return;
+    _edit(exerciseId, s.copyWith(setType: type));
+    flush();
+  }
+
+  void setNote(int exerciseId, int setId, String? note) {
+    final s = _set(exerciseId, setId);
+    final n = note?.trim();
     if (s == null) return;
-    final u = s.copyWith(
-      setType: s.setType.isWarmup ? SetType.normal : SetType.warmup,
+    _edit(
+      exerciseId,
+      s.copyWith(note: Value(n == null || n.isEmpty ? null : n)),
     );
-    _replaceSet(exerciseId, u);
-    _dirty[u.id] = u;
     flush();
   }
 
@@ -292,27 +372,57 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     _replaceExercise(latest.copyWith(sets: [...latest.sets, created]));
   }
 
-  Future<void> removeSet(int exerciseId, int setId) async {
+  /// Hides a set right away but keeps it for [undoDelete] until
+  /// [commitDelete] writes the delete. Only one delete is pending at a time.
+  /// The future completes once it is committed or undone.
+  Future<void> removeSet(int exerciseId, int setId) {
     final ex = _draft.byId(exerciseId);
-    if (ex == null) return;
-    _dirty.remove(setId);
-    final remaining = [
-      for (final s in ex.sets)
-        if (s.id != setId) s,
-    ];
-    final renumbered = [
-      for (var i = 0; i < remaining.length; i++)
-        remaining[i].position == i
-            ? remaining[i]
-            : remaining[i].copyWith(position: i),
-    ];
-    _replaceExercise(ex.copyWith(sets: renumbered));
-    await _repo.deleteSet(setId);
-    for (final s in renumbered) {
-      if (!remaining.contains(s)) _dirty[s.id] = s;
-    }
+    final index = ex?.sets.indexWhere((s) => s.id == setId) ?? -1;
+    if (ex == null || index < 0) return Future.value();
+    unawaited(commitDelete());
+    final p = (
+      exerciseId: exerciseId,
+      index: index,
+      set: ex.sets[index],
+      settled: Completer<void>(),
+    );
+    _pending = p;
+    _replaceExercise(
+      ex.copyWith(sets: _renumber([...ex.sets]..removeAt(index))),
+    );
     flush();
+    return p.settled.future;
   }
+
+  /// Puts the pending set back where it was. Returns false if there is none.
+  bool undoDelete() {
+    final p = _pending;
+    if (p == null) return false;
+    _pending = null;
+    p.settled.complete();
+    final ex = _draft.byId(p.exerciseId);
+    if (ex == null) return false;
+    final sets = [...ex.sets]..insert(p.index.clamp(0, ex.sets.length), p.set);
+    _replaceExercise(ex.copyWith(sets: _renumber(sets)));
+    flush();
+    return true;
+  }
+
+  /// Writes the pending delete. With [setId], only if it is that set.
+  Future<void> commitDelete([int? setId]) async {
+    final p = _pending;
+    if (p == null || (setId != null && p.set.id != setId)) return;
+    _pending = null;
+    _dirty.remove(p.set.id);
+    await _repo.deleteSet(p.set.id);
+    p.settled.complete();
+  }
+
+  /// Makes positions match the list order and marks moved sets for writing.
+  List<WorkoutSet> _renumber(List<WorkoutSet> sets) => [
+    for (final (i, s) in sets.indexed)
+      s.position == i ? s : _dirty[s.id] = s.copyWith(position: i),
+  ];
 
   // ------------------------------------------------------------ exercises
 
@@ -323,6 +433,11 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
         e.id,
         excludeWorkoutId: w.id,
         before: w.startedAt,
+      );
+      final bests = bestsBefore(
+        await _repo.setFacts([e.id]),
+        w.id,
+        w.startedAt,
       );
       final count = previous.isEmpty ? 3 : previous.length.clamp(1, 10);
       final (row, sets) = await _repo.addExercise(
@@ -341,6 +456,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
               exercise: e,
               sets: sets,
               previous: previous,
+              bests: bests[e.id],
             ),
           ],
         ),
@@ -395,6 +511,16 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     await _repo.rename(workoutId, n);
   }
 
+  /// Moves a past workout in time. Callers check the pair first.
+  Future<void> setTimes(DateTime start, DateTime end) async {
+    state = AsyncData(
+      _draft.copyWith(
+        workout: _draft.workout.copyWith(startedAt: start, endedAt: Value(end)),
+      ),
+    );
+    await _repo.setTimes(workoutId, start, end);
+  }
+
   void setBodyweight(double? kg) {
     state = AsyncData(_draft.copyWith(bodyweightKg: () => kg));
   }
@@ -404,6 +530,12 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   void flush() {
     _debounce?.cancel();
     unawaited(_writeDirty());
+  }
+
+  /// Leaving the app: a delete can't wait for its snackbar any longer.
+  void _settle() {
+    unawaited(commitDelete());
+    flush();
   }
 
   Future<void> _writeDirty() async {
@@ -417,6 +549,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   /// Returns false if nothing was logged (the workout is removed).
   Future<bool> finish() async {
     _debounce?.cancel();
+    await commitDelete();
     await _writeDirty();
     final d = _draft;
     final bodyweight = d.isLive
@@ -434,9 +567,12 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
 
   Future<void> discard() async {
     _debounce?.cancel();
+    await commitDelete();
     _dirty.clear();
+    final live = state.value?.isLive ?? true;
     await _repo.discard(workoutId);
-    ref.read(restTimerProvider.notifier).skip();
+    // Dropping a past workout must not stop the live workout’s rest timer.
+    if (live) ref.read(restTimerProvider.notifier).skip();
     _release();
   }
 

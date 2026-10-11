@@ -79,6 +79,24 @@ String fmtSet({
   return '$load $kTimes ${reps ?? '–'}';
 }
 
+/// Effort as entered in [mode]: the RPE, or RIR (10 − RPE). Empty when unset.
+String fmtEffort(double? rpe, EffortMode mode) =>
+    rpe == null ? '' : fmtNum(mode == EffortMode.rir ? 10 - rpe : rpe);
+
+/// "RPE 8.5" or "1.5 RIR".
+String fmtEffortLabel(double rpe, EffortMode mode) => mode == EffortMode.rir
+    ? '${fmtEffort(rpe, mode)} RIR'
+    : 'RPE ${fmtEffort(rpe, mode)}';
+
+/// Parses effort entered in [mode] into an RPE of 1–10 in 0.5 steps.
+/// Returns null if empty or out of range.
+double? parseEffort(String input, EffortMode mode) {
+  final v = parseNumber(input);
+  if (v == null) return null;
+  final rpe = ((mode == EffortMode.rir ? 10 - v : v) * 2).round() / 2;
+  return rpe < 1 || rpe > 10 ? null : rpe;
+}
+
 String fmtDuration(Duration d) {
   final m = d.inMinutes;
   if (m < 60) return '$m min';

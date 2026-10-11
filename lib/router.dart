@@ -8,6 +8,7 @@ import 'features/gym/template_editor_screen.dart';
 import 'features/gym/exercise_detail_screen.dart';
 import 'features/gym/gym_screen.dart';
 import 'features/history/history_screen.dart';
+import 'features/history/log_workout_route.dart';
 import 'features/history/workout_detail_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/progress/progress_screen.dart';
@@ -41,6 +42,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     parentNavigatorKey: rootNavigatorKey,
                     builder: (_, _) => const LiveWorkoutRoute(),
                   ),
+                  _workoutRoute('workouts/:workoutId'),
                 ],
               ),
             ],
@@ -50,7 +52,15 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/history',
                 builder: (_, _) => const HistoryScreen(),
-                routes: [_workoutRoute(':workoutId')],
+                routes: [
+                  GoRoute(
+                    path: 'log/:workoutId',
+                    parentNavigatorKey: rootNavigatorKey,
+                    builder: (_, s) =>
+                        LogWorkoutRoute(workoutId: _param(s, 'workoutId')),
+                  ),
+                  _workoutRoute(':workoutId'),
+                ],
               ),
             ],
           ),
@@ -106,23 +116,42 @@ final routerProvider = Provider<GoRouter>((ref) {
 int _param(GoRouterState s, String name) =>
     int.tryParse(s.pathParameters[name] ?? '') ?? -1;
 
+/// Exercise and workout pages link to each other, so their routes nest
+/// (`/gym/exercise/1/workout/2/exercise/3`). Each step gets a numbered path
+/// parameter to keep them unique, and the chain ends at [_maxLinkLevel].
+const _maxLinkLevel = 2;
+
+String _id(String name, int level) => level == 0 ? name : '$name$level';
+
 /// Exercise detail, nested in each tab that links to it so back stays there.
-GoRoute _exerciseRoute() => GoRoute(
-  path: 'exercise/:exerciseId',
-  builder: (_, s) => ExerciseDetailScreen(exerciseId: _param(s, 'exerciseId')),
+GoRoute _exerciseRoute({int level = 0}) => GoRoute(
+  path: 'exercise/:${_id('exerciseId', level)}',
+  builder: (_, s) => ExerciseDetailScreen(
+    exerciseId: _param(s, _id('exerciseId', level)),
+    canOpenWorkouts: level < _maxLinkLevel,
+  ),
+  routes: [
+    if (level < _maxLinkLevel)
+      _workoutRoute(
+        'workout/:${_id('workoutId', level + 1)}',
+        level: level + 1,
+      ),
+  ],
 );
 
 /// Workout detail with its full-screen editor and exercise links.
-GoRoute _workoutRoute(String path) => GoRoute(
+GoRoute _workoutRoute(String path, {int level = 0}) => GoRoute(
   path: path,
-  builder: (_, s) => WorkoutDetailScreen(workoutId: _param(s, 'workoutId')),
+  builder: (_, s) =>
+      WorkoutDetailScreen(workoutId: _param(s, _id('workoutId', level))),
   routes: [
     GoRoute(
       path: 'edit',
       parentNavigatorKey: rootNavigatorKey,
-      builder: (_, s) => WorkoutScreen(workoutId: _param(s, 'workoutId')),
+      builder: (_, s) =>
+          WorkoutScreen(workoutId: _param(s, _id('workoutId', level))),
     ),
-    _exerciseRoute(),
+    _exerciseRoute(level: level),
   ],
 );
 

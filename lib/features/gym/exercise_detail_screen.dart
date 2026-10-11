@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -11,14 +12,23 @@ import '../../providers.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
+import '../../widgets/charts/chart_card.dart';
 import '../../widgets/common.dart';
+import '../../widgets/set_list.dart';
 import 'exercise_editor_sheet.dart';
 import 'exercise_picker_sheet.dart';
 import 'exercise_trend_card.dart';
 
 class ExerciseDetailScreen extends ConsumerWidget {
-  const ExerciseDetailScreen({super.key, required this.exerciseId});
+  const ExerciseDetailScreen({
+    super.key,
+    required this.exerciseId,
+    this.canOpenWorkouts = true,
+  });
   final int exerciseId;
+
+  /// Whether the current route has a nested workout route to link to.
+  final bool canOpenWorkouts;
 
   Future<void> _delete(BuildContext context, WidgetRef ref, Exercise e) async {
     final repo = ref.read(exerciseRepoProvider);
@@ -59,6 +69,7 @@ class ExerciseDetailScreen extends ConsumerWidget {
     final sessions =
         ref.watch(exerciseSessionsProvider(exerciseId)).value ?? const [];
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final effort = ref.watch(settingsProvider.select((s) => s.effortMode));
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
 
@@ -66,8 +77,12 @@ class ExerciseDetailScreen extends ConsumerWidget {
       return Scaffold(appBar: AppBar());
     }
 
+    final facts = sessionFacts(exercise, sessions);
     final bests = ExerciseBests();
-    sessionFacts(exercise, sessions).forEach(bests.add);
+    facts.forEach(bests.add);
+    final repTable = hasRepMaxes(exercise.trackingType, exercise.loadMode)
+        ? repMaxes(facts)
+        : const <RepMax>[];
 
     String load(double kg) => fmtLoad(
       type: exercise.trackingType,
@@ -133,11 +148,54 @@ class ExerciseDetailScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.lg),
             child: Text(
-              '${exercise.muscleGroup.label} · ${exerciseTypeLabel(exercise)}'
-              '${exercise.isArchived ? ' · Archived' : ''}',
+              [
+                exercise.muscleGroup.label,
+                exerciseSubtitle(exercise),
+                if (exercise.perSide) 'Per side',
+                if (exercise.perDumbbell) 'Per dumbbell',
+                if (exercise.isArchived) 'Archived',
+              ].join(' · '),
               style: t.bodyMedium?.copyWith(color: lift.muted),
             ),
           ),
+          if (exercise.secondaryMuscles.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.xs,
+                Space.lg,
+                0,
+              ),
+              child: Text(
+                'Also works '
+                '${exercise.secondaryMuscles.map((g) => g.label).join(', ')}',
+                style: t.bodyMedium?.copyWith(color: lift.muted),
+              ),
+            ),
+          if (exercise.muscleGroup.isLegacy)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.xs,
+                Space.lg,
+                0,
+              ),
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: Space.sm,
+                children: [
+                  Text(
+                    'Filed under the old ${exercise.muscleGroup.label} group.',
+                    style: t.bodyMedium?.copyWith(color: lift.rest),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        showExerciseEditor(context, existing: exercise),
+                    child: const Text('Refile'),
+                  ),
+                ],
+              ),
+            ),
           if ((exercise.notes ?? '').isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -174,6 +232,20 @@ class ExerciseDetailScreen extends ConsumerWidget {
                 unit: unit,
               ),
             ),
+          if (repTable.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.md,
+                Space.lg,
+                0,
+              ),
+              child: _RepMaxCard(
+                exercise: exercise,
+                rows: repTable,
+                unit: unit,
+              ),
+            ),
           const SectionLabel('History'),
           if (sessions.isEmpty)
             Padding(
@@ -192,33 +264,98 @@ class ExerciseDetailScreen extends ConsumerWidget {
                 Space.sm,
               ),
               child: FlatCard(
+                onTap: canOpenWorkouts
+                    ? () => context.go(
+                        '${GoRouterState.of(context).matchedLocation}'
+                        '/workout/${s.workout.id}',
+                      )
+                    : null,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      dateFmt.format(s.workout.startedAt),
-                      style: t.titleMedium,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            dateFmt.format(s.workout.startedAt),
+                            style: t.titleMedium,
+                          ),
+                        ),
+                        if (canOpenWorkouts)
+                          AppIcon(AppIcons.chevronRight, color: lift.muted),
+                      ],
                     ),
                     const SizedBox(height: Space.xs),
-                    Text(
-                      s.sets
-                          .map(
-                            (set) =>
-                                '${set.setType.isWarmup ? 'W ' : ''}${fmtSet(
-                                  type: exercise.trackingType,
-                                  mode: exercise.loadMode,
-                                  loadKg: set.loadKg,
-                                  reps: set.reps,
-                                  unit: unit,
-                                )}',
-                          )
-                          .join('   '),
-                      style: t.bodyMedium?.copyWith(color: lift.muted),
+                    SetList(
+                      exercise: exercise,
+                      sets: s.sets,
+                      unit: unit,
+                      effort: effort,
+                      compact: true,
                     ),
                   ],
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Best load at each rep count the exercise has been done for.
+class _RepMaxCard extends StatelessWidget {
+  const _RepMaxCard({
+    required this.exercise,
+    required this.rows,
+    required this.unit,
+  });
+  final Exercise exercise;
+  final List<RepMax> rows;
+  final WeightUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final muted = LiftColors.of(context).muted;
+    final head = t.labelSmall?.copyWith(color: muted);
+    final body = t.bodyMedium?.copyWith(fontFeatures: Fonts.tabular);
+    final date = DateFormat('d MMM y');
+    final weights = exercise.trackingType == TrackingType.weights;
+
+    String load(double kg) {
+      final v = fmtLoad(
+        type: exercise.trackingType,
+        mode: exercise.loadMode,
+        loadKg: kg,
+        unit: unit,
+      );
+      return weights || kg != 0 ? '$v ${unit.label}' : v;
+    }
+
+    Widget row(String reps, String best, String when, TextStyle? style) =>
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: kCompactTap),
+          child: Row(
+            children: [
+              Expanded(flex: 2, child: Text(reps, style: style)),
+              Expanded(flex: 3, child: Text(best, style: style)),
+              Expanded(
+                flex: 3,
+                child: Text(when, style: style, textAlign: TextAlign.end),
+              ),
+            ],
+          ),
+        );
+
+    return ChartCard(
+      title: 'Rep maxes',
+      caption: 'Best ${weights ? 'weight' : 'load'} for an exact rep count.',
+      child: Column(
+        children: [
+          row('REPS', weights ? 'WEIGHT' : 'LOAD', 'DATE', head),
+          for (final r in rows)
+            row('${r.reps}', load(r.loadKg), date.format(r.date), body),
         ],
       ),
     );

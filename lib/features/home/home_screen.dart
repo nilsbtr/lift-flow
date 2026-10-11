@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
 import '../../data/template_repository.dart';
+import '../../domain/history.dart';
 import '../../domain/stats.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
@@ -14,6 +15,8 @@ import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/periodic_builder.dart';
 import '../gym/gym_screen.dart';
+import '../history/history_screen.dart';
+import '../history/workout_day_sheet.dart';
 import '../workout/workout_actions.dart';
 
 String relativeDay(DateTime d, [DateTime? now]) {
@@ -57,6 +60,17 @@ class HomeScreen extends ConsumerWidget {
             padding: EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, 0),
             child: _StartButton(),
           ),
+          if (history.isNotEmpty) ...[
+            const SectionLabel('Last workout'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              child: WorkoutSummaryCard(
+                workout: history.first,
+                unit: ref.watch(settingsProvider.select((s) => s.weightUnit)),
+                onTap: () => context.go('/workouts/${history.first.id}'),
+              ),
+            ),
+          ],
           SectionLabel(
             'Your templates',
             trailing: TextButton(
@@ -198,15 +212,30 @@ class _WeekStrip extends StatelessWidget {
     // By weekday, Monday first.
     const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
+    final dayFmt = DateFormat('EEEE d MMMM');
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-      child: Semantics(
-        label: '${trained.length} workouts this week',
-        child: Row(
-          children: [
-            for (var i = 0; i < 7; i++)
-              Expanded(
-                child: ExcludeSemantics(
+      child: Row(
+        children: [
+          for (var i = 0; i < 7; i++)
+            Expanded(
+              child: Semantics(
+                button: trained.contains(i),
+                label:
+                    '${dayFmt.format(days[i])}'
+                    '${trained.contains(i) ? ', trained' : ''}',
+                excludeSemantics: true,
+                child: InkWell(
+                  borderRadius: Radii.smAll,
+                  onTap: trained.contains(i)
+                      ? () => showWorkoutDaySheet(
+                          context,
+                          day: days[i],
+                          history: history,
+                          workoutPath: (id) => '/workouts/$id',
+                        )
+                      : null,
                   child: Column(
                     children: [
                       Text(
@@ -247,14 +276,15 @@ class _WeekStrip extends StatelessWidget {
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 }
 
-/// This week against the goal, and the streak. Opens Progress.
+/// This week against the goal, and the streak, with the volume change against
+/// the same point last week. Opens Progress.
 class _WeekCaption extends ConsumerWidget {
   const _WeekCaption();
 
@@ -270,6 +300,11 @@ class _WeekCaption extends ConsumerWidget {
           : '${s.workouts} of ${s.goal} this week',
       if (s.streak > 1) '${s.streak}-week streak',
     ];
+    final compare = compareWeeks(
+      ref.watch(historyProvider).value ?? const <Workout>[],
+      now: DateTime.now(),
+      firstDay: ref.watch(settingsProvider.select((s) => s.firstDayOfWeek)),
+    );
     return Padding(
       padding: const EdgeInsets.only(top: Space.xs),
       child: Center(
@@ -281,7 +316,20 @@ class _WeekCaption extends ConsumerWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Flexible(child: Text(parts.join(' · '))),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(parts.join(' · '), textAlign: TextAlign.center),
+                    if (compare != null)
+                      Text(
+                        compare.label,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        textAlign: TextAlign.center,
+                      ),
+                  ],
+                ),
+              ),
               const SizedBox(width: Space.xs),
               const AppIcon(AppIcons.chevronRight, size: IconSizes.sm),
             ],

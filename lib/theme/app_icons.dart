@@ -40,6 +40,8 @@ abstract final class AppIcons {
   static const progress = AppIconData('progress');
   static const progressSolid = AppIconData('progress_solid');
   static const search = AppIconData('search');
+  static const calendar = AppIconData('calendar');
+  static const list = AppIconData('list');
   static const trophySolid = AppIconData('trophy_solid');
   static const timer = AppIconData('timer');
   static const edit = AppIconData('edit');

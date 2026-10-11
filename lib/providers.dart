@@ -12,6 +12,7 @@ import 'data/exercise_repository.dart';
 import 'data/settings_repository.dart';
 import 'data/template_repository.dart';
 import 'data/workout_repository.dart';
+import 'domain/exercise_search.dart';
 import 'domain/records.dart';
 import 'domain/rest.dart';
 import 'domain/stats.dart';
@@ -125,6 +126,10 @@ final exerciseSessionsProvider = StreamProvider.autoDispose
     .family<List<ExerciseSession>, int>(
       (ref, id) => ref.watch(workoutRepoProvider).watchExerciseSessions(id),
     );
+
+final exerciseUsageProvider = StreamProvider<Map<int, ExerciseUsage>>(
+  (ref) => ref.watch(workoutRepoProvider).watchExerciseUsage(),
+);
 
 final templatesProvider = StreamProvider<List<TemplateDetail>>(
   (ref) => ref.watch(templateRepoProvider).watchAll(),

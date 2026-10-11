@@ -10,6 +10,8 @@ import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
+import '../../widgets/set_list.dart';
+import '../workout/workout_actions.dart';
 import 'session_card.dart';
 
 class WorkoutDetailScreen extends ConsumerWidget {
@@ -22,6 +24,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
     final loaded = async.value;
     final prs = ref.watch(workoutPrsProvider(workoutId)).value ?? const {};
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final effort = ref.watch(settingsProvider.select((s) => s.effortMode));
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
     // Shown under History and Progress; links stay in whichever tab it's in.
@@ -65,7 +68,9 @@ class WorkoutDetailScreen extends ConsumerWidget {
           PopupMenuButton<String>(
             icon: const AppIcon(AppIcons.more),
             onSelected: (v) async {
-              if (v == 'template') {
+              if (v == 'again') {
+                await startWorkout(context, ref, repeat: w);
+              } else if (v == 'template') {
                 final items = await ref
                     .read(templateRepoProvider)
                     .itemsFromWorkout(workoutId);
@@ -85,6 +90,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'again', child: Text('Do again')),
               const PopupMenuItem(
                 value: 'template',
                 child: Text('Save as template'),
@@ -139,40 +145,12 @@ class WorkoutDetailScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: Space.sm),
-                    for (final (i, label) in setLabels(
-                      ex.sets.map((s) => s.setType),
-                    ).indexed)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 28,
-                              child: Text(
-                                label,
-                                semanticsLabel: ex.sets[i].setType.isWarmup
-                                    ? 'Warm-up'
-                                    : 'Set $label',
-                                style: t.bodyMedium?.copyWith(
-                                  color: ex.sets[i].setType.isWarmup
-                                      ? lift.rest
-                                      : lift.muted,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              fmtSet(
-                                type: ex.exercise.trackingType,
-                                mode: ex.exercise.loadMode,
-                                loadKg: ex.sets[i].loadKg,
-                                reps: ex.sets[i].reps,
-                                unit: unit,
-                              ),
-                              style: t.bodyLarge,
-                            ),
-                          ],
-                        ),
-                      ),
+                    SetList(
+                      exercise: ex.exercise,
+                      sets: ex.sets,
+                      unit: unit,
+                      effort: effort,
+                    ),
                   ],
                 ),
               ),

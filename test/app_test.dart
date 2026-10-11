@@ -12,9 +12,12 @@ import 'package:lift_flow/data/exercise_repository.dart';
 import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/template_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
+import 'package:lift_flow/domain/exercise_search.dart';
+import 'package:lift_flow/domain/history.dart';
 import 'package:lift_flow/domain/muscles.dart';
 import 'package:lift_flow/domain/records.dart';
 import 'package:lift_flow/domain/rest.dart';
+import 'package:lift_flow/domain/stats.dart';
 import 'package:lift_flow/domain/units.dart';
 import 'package:lift_flow/providers.dart';
 import 'package:lift_flow/services/notifications.dart';
@@ -122,16 +125,17 @@ void main() {
     expect(withLegs, isNot(contains(MuscleGroup.arms)));
   });
 
-  test('setLabels numbers every set but warm-ups', () {
+  test('setLabels shows letters and counts every set but warm-ups', () {
     expect(
       setLabels([
         SetType.warmup,
         SetType.normal,
         SetType.drop,
         SetType.failure,
+        SetType.normal,
         SetType.amrap,
       ]),
-      ['W', '1', '2', '3', '4'],
+      ['W', '1', 'D', 'F', '4', 'A'],
     );
     expect([for (final t in SetType.values) t.letter], ['', 'W', 'D', 'F', 'A']);
   });
@@ -159,6 +163,214 @@ void main() {
       final r = adjustRest(at(3590), 3600, 30, now)!;
       expect(r.endsAt, at(kMaxRestSeconds));
       expect(r.totalSeconds, kMaxRestSeconds);
+    });
+  });
+
+  group('exercise search', () {
+    Exercise ex(
+      int id,
+      String name, {
+      MuscleGroup group = MuscleGroup.chest,
+      Equipment equipment = Equipment.none,
+      TrackingType type = TrackingType.weights,
+      List<MuscleGroup> secondary = const [],
+    }) => Exercise(
+      id: id,
+      name: name,
+      muscleGroup: group,
+      trackingType: type,
+      loadMode: LoadMode.none,
+      isArchived: false,
+      createdAt: DateTime(2025),
+      equipment: equipment,
+      perSide: false,
+      perDumbbell: false,
+      secondaryMuscles: secondary,
+    );
+
+    final library = [
+      ex(1, 'Bench press', equipment: Equipment.barbell),
+      ex(2, 'Dumbbell bench press', equipment: Equipment.dumbbell),
+      ex(3, 'Incline press', equipment: Equipment.dumbbell),
+      ex(4, 'Overhead press', group: MuscleGroup.shoulders),
+      ex(5, 'Romanian deadlift', group: MuscleGroup.hamstrings),
+      ex(6, 'Deadlift', group: MuscleGroup.back),
+      ex(7, 'Hammer curls', group: MuscleGroup.biceps),
+      ex(
+        8,
+        'Pull-up',
+        group: MuscleGroup.back,
+        type: TrackingType.bodyweight,
+        secondary: [MuscleGroup.biceps],
+      ),
+    ];
+
+    List<int> find(String q, {MuscleGroup? group, List<Exercise>? from}) => [
+      for (final e in rankExercises(from ?? library, query: q, group: group).exercises)
+        e.id,
+    ];
+
+    test('words match in any order and by prefix', () {
+      expect(find('press bench'), [1, 2]);
+      expect(find('inc pr'), [3]);
+      expect(find('curl'), [7]);
+      expect(find('xyz'), isEmpty);
+    });
+
+    test('abbreviations expand', () {
+      expect(find('db bench'), [2]);
+      expect(find('bb bench'), [1]);
+      expect(find('ohp'), [4]);
+      expect(find('rdl'), [5]);
+      expect(find('dl'), [6, 5]);
+    });
+
+    test('equipment, muscle and secondary muscles can match', () {
+      expect(find('barbell'), [1]);
+      expect(find('hamstrings'), [5]);
+      expect(find('bicep'), [7, 8]);
+      expect(find('bodyweight'), [8]);
+    });
+
+    test('name matches outrank equipment matches', () {
+      final l = [
+        ex(1, 'Cable row', group: MuscleGroup.back),
+        ex(2, 'Row', equipment: Equipment.dumbbell, group: MuscleGroup.back),
+        ex(3, 'Dumbbell press', equipment: Equipment.dumbbell),
+      ];
+      expect(find('dumbbell', from: l), [3, 2]);
+    });
+
+    test('the group filter limits the list', () {
+      expect(find('', group: MuscleGroup.back), [6, 8]);
+      expect(find('dead', group: MuscleGroup.back), [6]);
+    });
+
+    test('no query puts recent and frequent first, then A to Z', () {
+      final now = DateTime(2025, 6, 1);
+      final usage = {
+        8: ExerciseUsage(2, DateTime(2025, 5, 30)),
+        6: ExerciseUsage(30, DateTime(2024, 6, 1)),
+        1: ExerciseUsage(10, DateTime(2025, 5, 20)),
+      };
+      final r = rankExercises(library, usage: usage, now: now);
+      expect(r.recent, 3);
+      expect([for (final e in r.exercises) e.id].take(3), [1, 8, 6]);
+      expect([for (final e in r.exercises.skip(3)) e.name], [
+        'Dumbbell bench press',
+        'Hammer curls',
+        'Incline press',
+        'Overhead press',
+        'Romanian deadlift',
+      ]);
+      expect(rankExercises(library, now: now).recent, 0);
+    });
+
+    test('usage breaks ties between equal matches', () {
+      final usage = {4: ExerciseUsage(5, DateTime.now())};
+      final r = rankExercises(library, query: 'press', usage: usage);
+      expect(r.exercises.first.id, 4);
+      expect(r.recent, 0);
+    });
+  });
+
+  group('rep maxes', () {
+    SetFact fact(
+      int workout,
+      int day,
+      double? kg,
+      int? reps, {
+      TrackingType type = TrackingType.weights,
+      LoadMode mode = LoadMode.none,
+    }) => SetFact(
+      workoutId: workout,
+      startedAt: DateTime(2025, 1, day),
+      exerciseId: 1,
+      type: type,
+      mode: mode,
+      loadKg: kg,
+      reps: reps,
+      bodyweightKg: 80,
+    );
+
+    test('best load per exact rep count, first date wins ties', () {
+      final r = repMaxes([
+        fact(3, 20, 100, 5),
+        fact(1, 1, 100, 5),
+        fact(2, 10, 90, 5),
+        fact(2, 10, 120, 1),
+        fact(2, 10, 60, 12),
+        fact(2, 10, 50, 13),
+        fact(2, 10, null, 5),
+        fact(2, 10, 70, null),
+        fact(2, 10, 0, 8),
+      ]);
+      expect([for (final m in r) m.reps], [1, 5, 12]);
+      expect([for (final m in r) m.loadKg], [120, 100, 60]);
+      expect(r[1].date, DateTime(2025, 1, 1));
+      expect(r[1].workoutId, 1);
+    });
+
+    test('bodyweight modes use the signed load', () {
+      const bw = TrackingType.bodyweight;
+      final added = repMaxes([
+        fact(1, 1, 0, 8, type: bw, mode: LoadMode.added),
+        fact(1, 1, 10, 8, type: bw, mode: LoadMode.added),
+        fact(1, 1, null, 3, type: bw, mode: LoadMode.added),
+      ]);
+      expect([for (final m in added) (m.reps, m.loadKg)], [(3, 0.0), (8, 10.0)]);
+      // Less assistance is better.
+      final assisted = repMaxes([
+        fact(1, 1, -30, 5, type: bw, mode: LoadMode.assisted),
+        fact(2, 2, -20, 5, type: bw, mode: LoadMode.assisted),
+      ]);
+      expect(assisted.single.loadKg, -20);
+      // Bodyweight only has nothing to compare.
+      expect(hasRepMaxes(bw, LoadMode.none), isFalse);
+      expect(hasRepMaxes(bw, LoadMode.assisted), isTrue);
+      expect(repMaxes([fact(1, 1, null, 10, type: bw)]), isEmpty);
+    });
+
+    test('warm-ups never count', () {
+      final squat = Exercise(
+        id: 1,
+        name: 'Squat',
+        muscleGroup: MuscleGroup.quads,
+        trackingType: TrackingType.weights,
+        loadMode: LoadMode.none,
+        isArchived: false,
+        createdAt: DateTime(2025),
+        equipment: Equipment.barbell,
+        perSide: false,
+        perDumbbell: false,
+        secondaryMuscles: const [],
+      );
+      final workout = Workout(
+        id: 1,
+        name: 'Legs',
+        startedAt: DateTime(2025, 1, 1),
+        totalSets: 2,
+        totalVolumeKg: 0,
+        exerciseCount: 1,
+      );
+      WorkoutSet set(int id, double kg, SetType type) => WorkoutSet(
+        id: id,
+        workoutExerciseId: 1,
+        position: id,
+        loadKg: kg,
+        reps: 5,
+        isCompleted: true,
+        setType: type,
+      );
+      final r = repMaxes(
+        sessionFacts(squat, [
+          ExerciseSession(workout, [
+            set(1, 200, SetType.warmup),
+            set(2, 100, SetType.normal),
+          ]),
+        ]),
+      );
+      expect(r.single.loadKg, 100);
     });
   });
 
@@ -296,12 +508,12 @@ void main() {
       expect(w.exercises.single.sets, hasLength(1));
     });
 
-    test('starting a template mirrors the last session’s warm-ups', () async {
+    test('starting a template mirrors set types but failure', () async {
       final (repo, id, sets) = await bench();
       await repo.writeSets([
         done(sets[0], 40, 10, warmup: true),
-        done(sets[1], 80, 8),
-        done(sets[2], 80, 6),
+        done(sets[1], 80, 8).copyWith(setType: SetType.failure),
+        done(sets[2], 60, 12).copyWith(setType: SetType.drop),
       ]);
       await repo.finish(id, bodyweightKg: null);
       final ex = (await repo.load(id))!.exercises.single.exercise;
@@ -312,8 +524,223 @@ void main() {
 
       final next = (await repo.load(await repo.start(templateId: tid)))!;
       expect(
-        [for (final s in next.exercises.single.sets) s.setType.isWarmup],
-        [true, false, false, false],
+        [for (final s in next.exercises.single.sets) s.setType],
+        [SetType.warmup, SetType.normal, SetType.drop, SetType.normal],
+      );
+    });
+
+    test('a past workout can be logged during a live one', () async {
+      final (repo, live, _) = await bench(sets: 1);
+      final start = DateTime(2026, 10, 3, 18);
+      final end = DateTime(2026, 10, 3, 19, 15);
+      final id = await repo.createPast(start, end, bodyweightKg: 80);
+      expect((await repo.getLive())!.id, live);
+
+      final ex = (await repo.load(live))!.exercises.single.exercise;
+      final (_, sets) = await repo.addExercise(id, ex.id, position: 0, sets: 2);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      expect(
+        await repo.finish(id, bodyweightKg: 80, keepEndedAt: true),
+        isTrue,
+      );
+
+      final w = (await repo.load(id))!.workout;
+      expect((w.startedAt, w.endedAt, w.totalSets), (start, end, 1));
+      expect((await repo.watchHistory().first).map((x) => x.id), [id]);
+    });
+
+    test('abandoned past workouts are purged, logged ones are kept', () async {
+      final (repo, live, liveSets) = await bench(sets: 1);
+      await repo.writeSets([done(liveSets[0], 50, 5)]);
+      final ex = (await repo.load(live))!.exercises.single.exercise;
+      final empty = await repo.createPast(
+        DateTime(2026, 10, 1, 9),
+        DateTime(2026, 10, 1, 10),
+      );
+      final kept = await repo.createPast(
+        DateTime(2026, 10, 2, 9),
+        DateTime(2026, 10, 2, 10),
+      );
+      final (_, sets) = await repo.addExercise(kept, ex.id, position: 0);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(kept, bodyweightKg: null, keepEndedAt: true);
+
+      // The next log clears the empty one, not the live or finished ones.
+      final next = await repo.createPast(
+        DateTime(2026, 10, 3, 9),
+        DateTime(2026, 10, 3, 10),
+      );
+      expect(await repo.load(empty), isNull);
+      expect(await repo.load(kept), isNotNull);
+      expect(await repo.load(live), isNotNull);
+      expect(await repo.purgeEmpty(), 1);
+      expect(await repo.load(next), isNull);
+
+      // A saved workout is never purged, even if edits unchecked every set.
+      await repo.writeSets([done(sets[0], 60, 10).copyWith(isCompleted: false)]);
+      expect(await repo.purgeEmpty(), 0);
+      expect(await repo.load(kept), isNotNull);
+    });
+
+    test('setTimes moves a workout and finishing keeps the end', () async {
+      final (repo, id, sets) = await bench(sets: 1);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(id, bodyweightKg: null);
+      final start = DateTime(2026, 9, 1, 7);
+      final end = DateTime(2026, 9, 1, 8, 30);
+      await repo.setTimes(id, start, end);
+      final w = (await repo.load(id))!.workout;
+      expect((w.startedAt, w.endedAt), (start, end));
+
+      await repo.finish(id, bodyweightKg: null, keepEndedAt: true);
+      expect((await repo.load(id))!.workout.endedAt, end);
+    });
+
+    test('do again copies exercises, sets and targets', () async {
+      final exercises = ExerciseRepository(db);
+      final a = await exercises.create(
+        name: 'Bench press',
+        muscleGroup: MuscleGroup.chest,
+        trackingType: TrackingType.weights,
+      );
+      final b = await exercises.create(
+        name: 'Row',
+        muscleGroup: MuscleGroup.back,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      final tid = await TemplateRepository(db).save(
+        name: 'Upper',
+        items: [
+          TemplateItem(exercise: a, targetSets: 3, restSeconds: 90),
+          TemplateItem(exercise: b, targetSets: 2, supersetGroup: 1),
+        ],
+      );
+      final first = await repo.start(templateId: tid);
+      await repo.writeSets([
+        for (final e in (await repo.load(first))!.exercises)
+          for (final s in e.sets) done(s, 60, 8),
+      ]);
+      await repo.finish(first, bodyweightKg: null);
+
+      final source = (await repo.load(first))!.workout;
+      final items = await TemplateRepository(db).itemsFromWorkout(first);
+      final id = await repo.start(
+        templateId: source.templateId,
+        name: source.name,
+        items: items,
+      );
+      final again = (await repo.load(id))!;
+      expect(again.workout.endedAt, isNull);
+      expect(again.workout.name, 'Upper');
+      expect(again.workout.templateId, tid);
+      expect(again.exercises.map((e) => e.exercise.name), [
+        'Bench press',
+        'Row',
+      ]);
+      expect(again.exercises.map((e) => e.sets.length), [3, 2]);
+      expect(again.exercises.first.row.restSeconds, 90);
+      expect(again.exercises.last.row.supersetGroup, 1);
+      expect(
+        again.exercises.every((e) => e.sets.every((s) => !s.isCompleted)),
+        isTrue,
+      );
+      // The live guard in the repository still applies.
+      expect(
+        () => repo.start(name: 'x', items: items),
+        throwsA(isA<LiveWorkoutExistsException>()),
+      );
+    });
+
+    Future<Workout> logged(
+      DateTime start, {
+      double kg = 0,
+      String name = 'Push',
+      int? templateId,
+    }) => db
+        .into(db.workouts)
+        .insertReturning(
+          WorkoutsCompanion.insert(
+            name: name,
+            startedAt: start,
+            endedAt: Value(start.add(const Duration(hours: 1))),
+            totalSets: const Value(3),
+            totalVolumeKg: Value(kg),
+            templateId: Value(templateId),
+          ),
+        );
+
+    test('history filters by name, template and exercise', () async {
+      final (repo, id, sets) = await bench(sets: 1);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(id, bodyweightKg: null);
+      final exId = (await repo.load(id))!.exercises.single.exercise.id;
+      final tpl = await TemplateRepository(db).save(name: 'Legs', items: []);
+      final a = await logged(DateTime(2026, 10, 1), name: 'Legs', templateId: tpl);
+      final b = await logged(DateTime(2026, 10, 2), name: 'Push day');
+      final c = await logged(DateTime(2026, 10, 3), name: 'legs (home)');
+      final bench0 = (await repo.load(id))!.workout;
+      final all = [a, b, c, bench0];
+
+      expect(filterHistory(all), all);
+      expect(filterHistory(all, query: ' LEGS ').map((w) => w.id), [a.id, c.id]);
+      expect(filterHistory(all, templateId: tpl), [a]);
+      expect(filterHistory(all, query: 'push', templateId: tpl), isEmpty);
+      expect(filterHistory(all, query: 'nothing'), isEmpty);
+
+      final ids = await repo.workoutIdsWithExercise(exId);
+      expect(ids, {id});
+      expect(filterHistory(all, exerciseWorkoutIds: ids), [bench0]);
+      expect(filterHistory(all, exerciseWorkoutIds: {}), isEmpty);
+    });
+
+    test('week comparison matches the same part of last week', () async {
+      // Wednesday noon: last week’s Friday must not count against this week.
+      final now = DateTime(2026, 10, 14, 12);
+      final all = [
+        await logged(DateTime(2026, 10, 5, 10), kg: 1000),
+        await logged(DateTime(2026, 10, 9, 10), kg: 5000),
+        await logged(DateTime(2026, 10, 11, 10), kg: 500),
+        await logged(DateTime(2026, 10, 13, 10), kg: 1100),
+      ];
+      final monday = compareWeeks(all, now: now)!;
+      expect((monday.thisKg, monday.lastKg), (1100, 1000));
+      expect(monday.label, 'Volume +10% vs this time last week');
+      // With Sunday first, the 11th belongs to this week.
+      final sunday = compareWeeks(all, now: now, firstDay: DateTime.sunday)!;
+      expect((sunday.thisKg, sunday.lastKg), (1600, 1000));
+      expect(sunday.label, 'Volume +60% vs this time last week');
+
+      expect(compareWeeks(all.sublist(1), now: now), isNull);
+      expect(compareWeeks(all.sublist(0, 1), now: now), isNull);
+      final drop = [
+        await logged(DateTime(2026, 10, 6), kg: 1000),
+        await logged(DateTime(2026, 10, 13), kg: 500),
+      ];
+      expect(
+        compareWeeks(drop, now: now)!.label,
+        'Volume ${kMinus}50% vs this time last week',
+      );
+    });
+
+    test('a workout’s end must follow its start', () {
+      final start = DateTime(2026, 10, 13, 23, 30);
+      expect(endAtClock(start, 0, 30), DateTime(2026, 10, 14, 0, 30));
+      expect(endAtClock(start, 23, 45), DateTime(2026, 10, 13, 23, 45));
+      // Too far into the next day to be the same session.
+      final morning = DateTime(2026, 10, 13, 10);
+      expect(endAtClock(morning, 9, 0), DateTime(2026, 10, 13, 9));
+
+      final now = DateTime(2026, 10, 14, 12);
+      const after = 'End must be after start.';
+      const future = 'That’s in the future.';
+      expect(workoutTimesError(morning, DateTime(2026, 10, 13, 11), now), isNull);
+      expect(workoutTimesError(morning, morning, now), after);
+      expect(workoutTimesError(morning, DateTime(2026, 10, 13, 9), now), after);
+      expect(workoutTimesError(morning, DateTime(2026, 10, 14, 13), now), future);
+      expect(
+        workoutTimesError(DateTime(2026, 10, 15), DateTime(2026, 10, 15, 1), now),
+        future,
       );
     });
 
@@ -454,6 +881,107 @@ void main() {
       expect(kept.perSide && kept.perDumbbell, isTrue);
       expect(kept.equipment, Equipment.dumbbell);
       expect(kept.secondaryMuscles, isEmpty);
+    });
+
+    test('changing per-side or per-dumbbell recalculates volume', () async {
+      final exercises = ExerciseRepository(db);
+      final curl = await exercises.create(
+        name: 'Curl',
+        muscleGroup: MuscleGroup.biceps,
+        trackingType: TrackingType.weights,
+        equipment: Equipment.dumbbell,
+      );
+      final row = await exercises.create(
+        name: 'Row',
+        muscleGroup: MuscleGroup.back,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      final w1 = await repo.start();
+      final (_, a) = await repo.addExercise(w1, curl.id, position: 0);
+      final (_, b) = await repo.addExercise(w1, row.id, position: 1, sets: 2);
+      await repo.writeSets([
+        done(a[0], 20, 10),
+        done(b[0], 100, 5),
+        done(b[1], 60, 5, warmup: true),
+      ]);
+      await repo.finish(w1, bodyweightKg: null);
+      final w2 = await repo.start();
+      final (_, c) = await repo.addExercise(w2, row.id, position: 0);
+      await repo.writeSets([done(c[0], 80, 5)]);
+      await repo.finish(w2, bodyweightKg: null);
+      final live = await repo.start();
+      await repo.addExercise(live, curl.id, position: 0);
+
+      Future<List<double>> volumes() async => [
+        for (final id in [w1, w2, live])
+          (await repo.load(id))!.workout.totalVolumeKg,
+      ];
+      Future<void> flags({bool? side, bool? dumbbell, String? name}) =>
+          exercises.update(
+            curl.id,
+            name: name ?? curl.name,
+            muscleGroup: curl.muscleGroup,
+            trackingType: curl.trackingType,
+            loadMode: curl.loadMode,
+            perSide: side,
+            perDumbbell: dumbbell,
+          );
+
+      expect(await volumes(), [700, 400, 0]);
+      await flags(dumbbell: true);
+      expect(await volumes(), [900, 400, 0]);
+      await flags(side: true);
+      expect(await volumes(), [1300, 400, 0]);
+      await flags(side: false, dumbbell: false);
+      expect(await volumes(), [700, 400, 0]);
+
+      // Edits that leave both flags alone don't touch the stored summary.
+      await (db.update(db.workouts)..where((w) => w.id.equals(w1))).write(
+        const WorkoutsCompanion(totalVolumeKg: Value(1)),
+      );
+      await flags(name: 'Curls');
+      expect((await volumes())[0], 1);
+
+      // A rejected edit changes nothing.
+      await expectLater(
+        flags(side: true, name: 'Row'),
+        throwsA(isA<DuplicateNameException>()),
+      );
+      expect((await exercises.getById(curl.id))!.perSide, isFalse);
+      expect((await volumes())[0], 1);
+    });
+
+    test('exercise usage counts finished sessions only', () async {
+      final exercises = ExerciseRepository(db);
+      final bench = await exercises.create(
+        name: 'Bench press',
+        muscleGroup: MuscleGroup.chest,
+        trackingType: TrackingType.weights,
+      );
+      final squat = await exercises.create(
+        name: 'Squat',
+        muscleGroup: MuscleGroup.quads,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      var last = 0;
+      for (var i = 0; i < 2; i++) {
+        last = await repo.start();
+        final (_, s) = await repo.addExercise(last, bench.id, position: 0);
+        await repo.writeSets([done(s[0], 60, 5)]);
+        await repo.finish(last, bodyweightKg: null);
+      }
+      final live = await repo.start();
+      await repo.addExercise(live, squat.id, position: 0);
+
+      final usage = await repo.watchExerciseUsage().first;
+      expect(usage.keys, [bench.id]);
+      expect(usage[bench.id]!.count, 2);
+      expect(
+        usage[bench.id]!.lastUsed,
+        (await repo.load(last))!.workout.startedAt,
+      );
     });
 
     test('writeSets stores the new set fields', () async {
