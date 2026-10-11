@@ -197,7 +197,7 @@ class _TemplateListState extends ConsumerState<_TemplateList> {
         icon: AppIcons.notepad,
         title: 'No templates yet',
         message:
-            'A template is a reusable workout, like "Push" or "Legs". '
+            'A template is a reusable workout, like “Push” or “Legs”. '
             'Start it from Home with one tap.',
         action: FilledButton.icon(
           onPressed: () => context.push('/gym/template/new'),

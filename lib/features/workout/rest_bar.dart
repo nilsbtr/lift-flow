@@ -78,7 +78,7 @@ class _RestPanel extends ConsumerWidget {
                   const Spacer(),
                   TextButton(
                     onPressed: () => ctrl.adjust(-15),
-                    child: const Text('−15'),
+                    child: const Text('${kMinus}15'),
                   ),
                   TextButton(
                     onPressed: () => ctrl.adjust(15),

@@ -105,7 +105,7 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
                       title: Text(
                         q.isEmpty
                             ? 'Create exercise'
-                            : "Create '${_text.trim()}'",
+                            : "Create “${_text.trim()}”",
                         style: TextStyle(color: scheme.primary),
                       ),
                       onTap: _create,

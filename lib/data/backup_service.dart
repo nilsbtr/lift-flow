@@ -264,14 +264,14 @@ Map<String, Object?> _map(Object? v, String what) =>
 
 List<Object?> _list(Map<String, Object?> m, String k) {
   final v = m[k];
-  return v is List<Object?> ? v : _fail('"$k" must be a list');
+  return v is List<Object?> ? v : _fail('“$k” must be a list');
 }
 
 int _int(Map<String, Object?> m, String k, {int? min, int? max}) {
   final v = m[k];
-  if (v is! int) _fail('"$k" must be an integer');
+  if (v is! int) _fail('“$k” must be an integer');
   if ((min != null && v < min) || (max != null && v > max)) {
-    _fail('"$k" out of range');
+    _fail('“$k” out of range');
   }
   return v;
 }
@@ -287,18 +287,18 @@ double? _numOrNull(
 }) {
   final v = m[k];
   if (v == null) return null;
-  if (v is! num || !v.isFinite) _fail('"$k" must be a number');
+  if (v is! num || !v.isFinite) _fail('“$k” must be a number');
   final d = v.toDouble();
   if ((min != null && d < min) || (max != null && d > max)) {
-    _fail('"$k" out of range');
+    _fail('“$k” out of range');
   }
   return d;
 }
 
 String _str(Map<String, Object?> m, String k, {int min = 0, int max = 1000}) {
   final v = m[k];
-  if (v is! String) _fail('"$k" must be a string');
-  if (v.length < min || v.length > max) _fail('"$k" has invalid length');
+  if (v is! String) _fail('“$k” must be a string');
+  if (v.length < min || v.length > max) _fail('“$k” has invalid length');
   return v;
 }
 
@@ -307,12 +307,12 @@ String? _strOrNull(Map<String, Object?> m, String k, {int max = 1000}) =>
 
 bool _bool(Map<String, Object?> m, String k) {
   final v = m[k];
-  return v is bool ? v : _fail('"$k" must be true or false');
+  return v is bool ? v : _fail('“$k” must be true or false');
 }
 
 DateTime _date(Map<String, Object?> m, String k) {
   final d = DateTime.tryParse(_str(m, k, max: 40));
-  return d ?? _fail('"$k" must be a date');
+  return d ?? _fail('“$k” must be a date');
 }
 
 DateTime? _dateOrNull(Map<String, Object?> m, String k) =>
@@ -322,10 +322,10 @@ final _dayPattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
 DateTime _localDay(Map<String, Object?> m, String k) {
   final match = _dayPattern.firstMatch(_str(m, k, max: 10));
-  if (match == null) _fail('"$k" must be a day like 2025-01-31');
+  if (match == null) _fail('“$k” must be a day like 2025-01-31');
   final [y, mo, d] = [for (var i = 1; i <= 3; i++) int.parse(match[i]!)];
   final day = DateTime(y, mo, d);
-  if (day.month != mo || day.day != d) _fail('"$k" is not a valid day');
+  if (day.month != mo || day.day != d) _fail('“$k” is not a valid day');
   return day;
 }
 
@@ -334,7 +334,7 @@ T _enum<T extends Enum>(List<T> values, Map<String, Object?> m, String k) {
   for (final v in values) {
     if (v.name == s) return v;
   }
-  _fail('"$k" has unknown value "$s"');
+  _fail('“$k” has unknown value “$s”');
 }
 
 List<T> _enumList<T extends Enum>(
@@ -439,7 +439,7 @@ ParsedBackup parseBackup(Uint8List bytes) {
     final id = _int(e, 'id', min: 1);
     final name = _str(e, 'name', min: 1, max: 60).trim();
     if (name.isEmpty) _fail('exercise name is empty');
-    if (!names.add(name.toLowerCase())) _fail('duplicate exercise "$name"');
+    if (!names.add(name.toLowerCase())) _fail('duplicate exercise “$name”');
     if (exerciseInfo.containsKey(id)) _fail('duplicate exercise id $id');
     final type = _enum(TrackingType.values, e, 'trackingType');
     final mode = type == TrackingType.weights
@@ -647,7 +647,7 @@ ParsedBackup parseBackup(Uint8List bytes) {
       final b = _map(raw, 'body-weight entry');
       final day = _localDay(b, 'date');
       if (log.containsKey(day)) _fail('more than one body weight per day');
-      log[day] = _numOrNull(b, 'kg', min: 20, max: 400) ?? _fail('"kg" missing');
+      log[day] = _numOrNull(b, 'kg', min: 20, max: 400) ?? _fail('“kg” missing');
     }
   } else {
     snapshots.sort((a, b) => a.$1.compareTo(b.$1));
