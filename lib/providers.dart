@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -214,6 +215,9 @@ final liveWorkoutProvider = Provider<Workout?>((ref) {
   return ref.read(initialLiveWorkoutProvider);
 });
 
+/// Live workouts already asked about being forgotten in this app session.
+final forgottenAskedProvider = Provider<Set<int>>((ref) => {});
+
 // ------------------------------------------------------------ rest timer
 
 class RestTimerState {
@@ -264,6 +268,7 @@ class RestTimerController extends Notifier<RestTimerState?> {
 
   void start(int seconds) {
     if (seconds <= 0) return;
+    seconds = seconds.clamp(1, kMaxRestSeconds);
     _set(
       RestTimerState(DateTime.now().add(Duration(seconds: seconds)), seconds),
     );
@@ -297,12 +302,23 @@ class RestTimerController extends Notifier<RestTimerState?> {
     unawaited(ref.read(restRepoProvider).save(s.endsAt, s.totalSeconds));
   }
 
+  /// A hidden app gets the scheduled alert instead.
+  static bool get _inForeground {
+    final s = WidgetsBinding.instance.lifecycleState;
+    return s == null ||
+        s == AppLifecycleState.resumed ||
+        s == AppLifecycleState.inactive;
+  }
+
   void _arm(RestTimerState s) {
     _end?.cancel();
     _end = Timer(s.endsAt.difference(DateTime.now()), () {
       if (state != s) return;
       unawaited(HapticFeedback.heavyImpact());
       unawaited(HapticFeedback.vibrate());
+      if (_inForeground && ref.read(settingsProvider).restSound) {
+        unawaited(ref.read(notificationsProvider).playRestSound());
+      }
       skip();
     });
   }

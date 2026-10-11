@@ -242,6 +242,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 onTap: () =>
                     ref.read(notificationsProvider).requestExactAlarms(),
               ),
+            SwitchListTile(
+              title: const Text('Sound when rest is over'),
+              subtitle: const Text('While the app is open'),
+              value: s.restSound,
+              onChanged: (v) async {
+                // The sound is a notification, so Android 13+ asks first.
+                if (v) {
+                  await ref.read(notificationsProvider).requestPermission();
+                }
+                await _ctrl.update(AppSettingsCompanion(restSound: Value(v)));
+              },
+            ),
             const SectionLabel('Workout'),
             ListTile(
               title: const Text('Weekly goal'),
