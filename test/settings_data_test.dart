@@ -1,16 +1,25 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lift_flow/data/backup_service.dart';
 import 'package:lift_flow/data/database.dart';
+import 'package:lift_flow/data/exercise_repository.dart';
 import 'package:lift_flow/data/settings_repository.dart';
+import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/backup_nudge.dart';
 import 'package:lift_flow/domain/csv_export.dart';
+import 'package:lift_flow/features/settings/backup_actions.dart';
+import 'package:lift_flow/features/workout/workout_controller.dart';
+import 'package:lift_flow/providers.dart';
+import 'package:material_ui/material_ui.dart';
 
 void main() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
   group('backup nudge', () {
     final base = DateTime(2026, 3, 1, 12);
     List<DateTime> days(int n, {DateTime? from}) => [
@@ -306,6 +315,134 @@ void main() {
       expect(csvField(' padded '), ' padded ');
       expect(csvField('a"b'), '"a""b"');
       expect(csvField('a,b'), '"a,b"');
+    });
+  });
+
+  group('import and reset', () {
+    late AppDatabase db;
+    late BackupService backup;
+    setUp(() {
+      db = AppDatabase(NativeDatabase.memory());
+      backup = BackupService(db);
+    });
+    tearDown(() => db.close());
+
+    Future<int> seed(AppDatabase d, String name, {bool live = false}) async {
+      final e = await ExerciseRepository(d).create(
+        name: 'Row',
+        muscleGroup: MuscleGroup.back,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(d);
+      final id = await repo.start(name: name);
+      final (_, sets) = await repo.addExercise(id, e.id, position: 0);
+      await repo.writeSets([
+        sets.first.copyWith(
+          loadKg: const Value(60),
+          reps: const Value(8),
+          isCompleted: true,
+        ),
+      ]);
+      if (!live) await repo.finish(id, bodyweightKg: null);
+      return id;
+    }
+
+    test('are refused while a workout is live, and change nothing', () async {
+      await seed(db, 'Running', live: true);
+      final other = AppDatabase(NativeDatabase.memory());
+      addTearDown(other.close);
+      await seed(other, 'From file');
+      final file = await BackupService(other).export();
+
+      await expectLater(
+        backup.import(file),
+        throwsA(isA<BackupBlockedException>()),
+      );
+      await expectLater(
+        backup.deleteAll(),
+        throwsA(isA<BackupBlockedException>()),
+      );
+      final w = await db.select(db.workouts).getSingle();
+      expect(w.name, 'Running');
+      expect(await db.select(db.exercises).get(), hasLength(1));
+    });
+
+    test('the message says why and what to do', () {
+      expect(BackupBlockedException.message, contains('workout is running'));
+      expect(BackupBlockedException.message, contains('Finish or discard'));
+    });
+
+    test('work again once the workout is finished', () async {
+      final id = await seed(db, 'Running', live: true);
+      await WorkoutRepository(db).finish(id, bodyweightKg: null);
+      await backup.deleteAll();
+      expect(await db.select(db.workouts).get(), isEmpty);
+    });
+
+    test('a file holding an unfinished workout still imports', () async {
+      final other = AppDatabase(NativeDatabase.memory());
+      addTearDown(other.close);
+      await seed(other, 'Unfinished', live: true);
+      await backup.import(await BackupService(other).export());
+      expect((await WorkoutRepository(db).getLive())?.name, 'Unfinished');
+    });
+
+    testWidgets('resetAppState drops what the old data left in memory', (
+      tester,
+    ) async {
+      late WidgetRef ref;
+      await tester.runAsync(() async {
+        final id = await seed(db, 'Old');
+        final other = AppDatabase(NativeDatabase.memory());
+        await seed(other, 'New');
+        await SettingsRepository(
+          other,
+        ).write(const AppSettingsCompanion(weightUnit: Value(WeightUnit.lb)));
+        final file = await BackupService(other).export();
+        await other.close();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              databaseProvider.overrideWithValue(db),
+              initialSettingsProvider.overrideWithValue(
+                await SettingsRepository(db).get(),
+              ),
+            ],
+            child: Consumer(
+              builder: (context, r, _) {
+                ref = r;
+                return const SizedBox();
+              },
+            ),
+          ),
+        );
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(Consumer)),
+        );
+        final editor = container.listen(workoutEditorProvider(id), (_, _) {});
+        expect(
+          (await container.read(workoutEditorProvider(id).future)).workout.name,
+          'Old',
+        );
+        ref.read(restTimerProvider.notifier).start(60);
+        expect(ref.read(restTimerProvider), isNotNull);
+        expect(ref.read(settingsProvider).weightUnit, WeightUnit.kg);
+        ref.read(forgottenAskedProvider).add(id);
+
+        await backup.import(file);
+        // Nothing has been told yet: the cached copies are stale.
+        expect(ref.read(settingsProvider).weightUnit, WeightUnit.kg);
+
+        await resetAppState(ref);
+        expect(ref.read(restTimerProvider), isNull);
+        expect(ref.read(settingsProvider).weightUnit, WeightUnit.lb);
+        expect(ref.read(forgottenAskedProvider), isEmpty);
+        final fresh = await container.read(workoutEditorProvider(id).future);
+        expect(fresh.workout.name, 'New');
+        expect(await RestRepository(db).get(), isNull);
+        editor.close();
+      });
     });
   });
 }

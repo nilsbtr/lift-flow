@@ -17,6 +17,15 @@ class BackupFormatException implements Exception {
   String toString() => message;
 }
 
+/// An import or delete-all was refused because a workout is running.
+class BackupBlockedException implements Exception {
+  const BackupBlockedException();
+  static const message =
+      'A workout is running. Finish or discard it, then try again.';
+  @override
+  String toString() => message;
+}
+
 /// JSON export / import of all data. Import replaces everything in a single
 /// transaction after strict validation. Progress photos are files on the
 /// device and stay out of both.
@@ -201,6 +210,7 @@ class BackupService {
     }
     final parsed = await Isolate.run(_parser(bytes));
     await _db.transaction(() async {
+      await _ensureNoLiveWorkout();
       await _clear();
       await _db.update(_db.appSettings).write(parsed.settings);
       await _db.batch((b) {
@@ -223,12 +233,21 @@ class BackupService {
   }
 
   Future<void> deleteAll() => _db.transaction(() async {
+    await _ensureNoLiveWorkout();
     await _clear();
     await _db.delete(_db.appSettings).go();
     await _db
         .into(_db.appSettings)
         .insert(const AppSettingsCompanion(id: Value(1)));
   });
+
+  /// A running workout has an editor in memory that these would orphan.
+  Future<void> _ensureNoLiveWorkout() async {
+    final live = await (_db.select(
+      _db.workouts,
+    )..where((w) => w.endedAt.isNull())).get();
+    if (live.isNotEmpty) throw const BackupBlockedException();
+  }
 
   Future<void> _clear() async {
     await _db.delete(_db.restState).go();

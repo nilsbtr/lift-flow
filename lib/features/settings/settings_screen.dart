@@ -112,7 +112,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (mounted) setState(() => _busy = false);
   }
 
+  /// Import and delete-all would orphan the running workout.
+  bool _blockedByWorkout() {
+    final blocked = ref.read(liveWorkoutProvider) != null;
+    if (blocked) toast(context, BackupBlockedException.message);
+    return blocked;
+  }
+
   Future<void> _import() async {
+    if (_blockedByWorkout()) return;
     final ok = await confirm(
       context,
       title: 'Import backup?',
@@ -131,10 +139,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       }
       final bytes = await file.readAsBytes();
       await ref.read(backupProvider).import(bytes);
-      await _afterReset();
+      await resetAppState(ref);
       if (mounted) toast(context, 'Backup imported');
     } on BackupFormatException catch (e) {
       if (mounted) toast(context, e.message);
+    } on BackupBlockedException catch (e) {
+      if (mounted) toast(context, e.toString());
     } catch (e) {
       if (mounted) toast(context, 'Import failed');
     } finally {
@@ -143,6 +153,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 
   Future<void> _deleteAll() async {
+    if (_blockedByWorkout()) return;
     final ok = await confirm(
       context,
       title: 'Delete all data?',
@@ -153,14 +164,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       destructive: true,
     );
     if (!ok) return;
-    await ref.read(backupProvider).deleteAll();
-    await _afterReset();
-    if (mounted) toast(context, 'All data deleted');
-  }
-
-  Future<void> _afterReset() async {
-    ref.read(restTimerProvider.notifier).skip();
-    await _ctrl.reload();
+    try {
+      await ref.read(backupProvider).deleteAll();
+      await resetAppState(ref);
+      if (mounted) toast(context, 'All data deleted');
+    } on BackupBlockedException catch (e) {
+      if (mounted) toast(context, e.toString());
+    }
   }
 
   @override

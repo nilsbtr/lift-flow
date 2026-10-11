@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -5,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../providers.dart';
 import '../../widgets/common.dart';
+import '../workout/workout_controller.dart';
 
 /// Saves a JSON backup through the system file picker and records the date.
 /// Shared by Settings and the Home nudge.
@@ -44,4 +47,16 @@ Future<void> exportSetsCsv(BuildContext context, WidgetRef ref) async {
   } catch (e) {
     if (context.mounted) toast(context, 'Export failed');
   }
+}
+
+/// Drops what the app kept in memory about the old data, after an import or
+/// delete-all. Streams over the database update by themselves; the rest
+/// doesn't: workout editors, the asked-about-forgotten set, the rest timer
+/// (and its notifications) and the settings, whose startup copy is stale.
+Future<void> resetAppState(WidgetRef ref) async {
+  ref.read(restTimerProvider.notifier).skip();
+  ref.invalidate(workoutEditorProvider);
+  ref.invalidate(forgottenAskedProvider);
+  unawaited(ref.read(notificationsProvider).clear());
+  await ref.read(settingsProvider.notifier).reload();
 }
