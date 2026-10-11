@@ -4,12 +4,12 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 
 ## Features
 
-- **Workouts**: start empty or from a template. Log load × reps per set, see the previous session's sets, and complete sets with ✓. Mark sets as warm-up, drop, failure, or AMRAP, add a note, and optionally log RPE or RIR. Beaten records show up as you log. Unchecked sets are dropped on finish, or marked done first. A workout can end at its last set when you finish late, a forgotten one is caught after 4 h, and a default name becomes e.g. "Chest and arms".
+- **Workouts**: start empty or from a template. Log load × reps per set, see the previous session's sets, and complete sets with ✓. Mark sets as warm-up, drop, failure, or AMRAP, add a note, and optionally log RPE or RIR. Beaten records show up as you log. Unchecked sets are dropped on finish, or marked done first. A workout can end at its last set when you finish late, a forgotten one is caught after 4 h, and a default name becomes e.g. "Chest and arms". Link exercises into supersets or circuits (focus alternates and rest starts after the round), replace an exercise without losing its sets, add warm-up sets in one tap, set a rest time per exercise, and add a note to the workout or to an exercise in it. When every set reached the top of the rep range, the next weight is suggested. Barbell sets show the plates per side.
 - **Rest timer**: starts automatically after each set or by hand from the app bar, with ±15 s, Skip, presets (60, 90, 120, 180 s) and a custom time. In the background, an ongoing workout notification stays up and a rest countdown adds Skip and +30 s buttons that also work from the lock screen. An alert fires when the rest ends, or an optional sound if the app is open.
 - **Templates**: reusable workouts with target sets and rep ranges. Create one from scratch or from a finished workout. Group templates into collapsible folders, duplicate them, and set rest, a target weight and supersets per exercise.
 - **Exercises**: weights or bodyweight, filed under a muscle group (required, with optional secondary muscles), with equipment and per-side or per-dumbbell loads that count in volume. The picker lists recent and frequent exercises first and matches loosely (“db bench”). The exercise page shows a rep-max table and links each session to its workout. Bodyweight exercises can track added or assisted load. An exercise that has logged sets is archived instead of deleted.
 - **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps).
-- **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, rest defaults, set effort (RPE or RIR), keep screen on, and JSON backup export/import.
+- **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, rest defaults, set effort (RPE or RIR), bar weight and available plates, keep screen on, and JSON backup export/import.
 
 ## Tech stack
 
@@ -50,7 +50,7 @@ lib/
   router.dart      routes, bottom navigation shell, live workout bar
   providers.dart   Riverpod providers (repositories, streams, settings, rest timer)
   data/            drift schema, enums, repositories, backup service
-  domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats
+  domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats, plate math, warm-ups, supersets
   features/        screens by tab: home, history, gym, workout, settings
   services/        local notifications
   theme/           colors, text theme, spacing/radius/motion tokens, icons
