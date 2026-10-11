@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show OrderingTerm, Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,12 +13,15 @@ import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/template_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/exercise_search.dart';
+import 'package:lift_flow/domain/finish.dart';
 import 'package:lift_flow/domain/history.dart';
 import 'package:lift_flow/domain/muscles.dart';
 import 'package:lift_flow/domain/records.dart';
 import 'package:lift_flow/domain/rest.dart';
 import 'package:lift_flow/domain/stats.dart';
 import 'package:lift_flow/domain/units.dart';
+import 'package:lift_flow/domain/workout_name.dart';
+import 'package:lift_flow/features/workout/workout_controller.dart';
 import 'package:lift_flow/providers.dart';
 import 'package:lift_flow/services/notifications.dart';
 import 'package:lift_flow/widgets/common.dart';
@@ -371,6 +374,493 @@ void main() {
         ]),
       );
       expect(r.single.loadKg, 100);
+    });
+  });
+
+  group('rest presets', () {
+    test('parseRestTime reads seconds and m:ss', () {
+      expect(parseRestTime('90'), 90);
+      expect(parseRestTime(' 1:30 '), 90);
+      expect(parseRestTime('0:45'), 45);
+      expect(parseRestTime('1:5'), 65);
+      expect(parseRestTime('60:00'), kMaxRestSeconds);
+      for (final bad in [
+        '',
+        '0',
+        '0:00',
+        '1:75',
+        '61:00',
+        '3601',
+        '1:',
+        ':30',
+      ]) {
+        expect(parseRestTime(bad), isNull, reason: bad);
+      }
+      expect(parseRestTime('abc'), isNull);
+      expect(parseRestTime('1:2:3'), isNull);
+    });
+
+    test('the presets are valid rest times', () {
+      expect(kRestPresets, [60, 90, 120, 180]);
+      expect(kRestPresets.every((s) => parseRestTime('$s') == s), isTrue);
+    });
+  });
+
+  group('ending a workout', () {
+    final start = DateTime(2025, 1, 1, 18);
+    final now = DateTime(2025, 1, 1, 20);
+    DateTime ago(int minutes) => now.subtract(Duration(minutes: minutes));
+
+    test('staleEnd offers the last set after half an hour', () {
+      expect(staleEnd(ago(31), startedAt: start, now: now), ago(31));
+      expect(staleEnd(ago(30), startedAt: start, now: now), isNull);
+      expect(staleEnd(ago(5), startedAt: start, now: now), isNull);
+      expect(staleEnd(null, startedAt: start, now: now), isNull);
+      expect(staleEnd(start, startedAt: start, now: now), isNull);
+      expect(
+        staleEnd(
+          start.subtract(const Duration(hours: 1)),
+          startedAt: start,
+          now: now,
+        ),
+        isNull,
+      );
+    });
+
+    test('a workout looks forgotten after the stats cap', () {
+      expect(kForgottenAfter, kMaxWorkoutTime);
+      expect(looksForgotten(start, start.add(kForgottenAfter)), isFalse);
+      expect(
+        looksForgotten(
+          start,
+          start.add(kForgottenAfter + const Duration(minutes: 1)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('endWithin keeps the end between start and now', () {
+      expect(endWithin(ago(60), start: start, now: now), ago(60));
+      expect(
+        endWithin(now.add(const Duration(hours: 1)), start: start, now: now),
+        now,
+      );
+      expect(
+        endWithin(
+          start.subtract(const Duration(hours: 1)),
+          start: start,
+          now: now,
+        ),
+        start,
+      );
+    });
+  });
+
+  group('suggestWorkoutName', () {
+    String? name(Map<MuscleGroup, int> sets) => suggestWorkoutName(sets);
+
+    test('names the dominant groups', () {
+      expect(name({MuscleGroup.chest: 9}), 'Chest');
+      expect(
+        name({MuscleGroup.chest: 6, MuscleGroup.back: 6}),
+        'Chest and back',
+      );
+      expect(
+        name({
+          MuscleGroup.chest: 8,
+          MuscleGroup.shoulders: 4,
+          MuscleGroup.triceps: 4,
+        }),
+        'Chest, shoulders and triceps',
+      );
+      // The group with more sets comes first, ties follow body order.
+      expect(
+        name({MuscleGroup.back: 3, MuscleGroup.chest: 5}),
+        'Chest and back',
+      );
+      expect(
+        name({MuscleGroup.back: 4, MuscleGroup.chest: 4}),
+        'Chest and back',
+      );
+    });
+
+    test('rolls fine-grained groups up', () {
+      expect(name({MuscleGroup.biceps: 4, MuscleGroup.triceps: 4}), 'Arms');
+      expect(
+        name({
+          MuscleGroup.chest: 9,
+          MuscleGroup.biceps: 3,
+          MuscleGroup.triceps: 3,
+        }),
+        'Chest and arms',
+      );
+      expect(
+        name({
+          MuscleGroup.quads: 5,
+          MuscleGroup.hamstrings: 4,
+          MuscleGroup.glutes: 3,
+        }),
+        'Legs',
+      );
+      expect(name({MuscleGroup.quads: 8}), 'Quads');
+      expect(
+        name({MuscleGroup.biceps: 6, MuscleGroup.back: 6}),
+        'Back and biceps',
+      );
+      expect(name({MuscleGroup.arms: 6, MuscleGroup.legs: 6}), 'Arms and legs');
+      expect(name({MuscleGroup.arms: 6, MuscleGroup.biceps: 6}), 'Arms');
+    });
+
+    test('leaves out groups with few sets', () {
+      expect(name({MuscleGroup.chest: 20, MuscleGroup.calves: 1}), 'Chest');
+      expect(
+        name({MuscleGroup.chest: 4, MuscleGroup.triceps: 1}),
+        'Chest and triceps',
+      );
+    });
+
+    test('a spread reads as full body', () {
+      expect(
+        name({
+          MuscleGroup.chest: 4,
+          MuscleGroup.back: 4,
+          MuscleGroup.shoulders: 4,
+          MuscleGroup.biceps: 3,
+          MuscleGroup.quads: 4,
+        }),
+        'Full body',
+      );
+      expect(
+        name({MuscleGroup.quads: 5, MuscleGroup.chest: 5, MuscleGroup.back: 5}),
+        'Full body',
+      );
+      expect(
+        name({MuscleGroup.fullBody: 5, MuscleGroup.chest: 2}),
+        'Full body',
+      );
+      expect(
+        name({
+          for (final g in [
+            MuscleGroup.chest,
+            MuscleGroup.back,
+            MuscleGroup.shoulders,
+            MuscleGroup.biceps,
+            MuscleGroup.quads,
+            MuscleGroup.core,
+          ])
+            g: 2,
+        }),
+        'Full body',
+      );
+      expect(
+        name({
+          MuscleGroup.chest: 4,
+          MuscleGroup.back: 4,
+          MuscleGroup.shoulders: 4,
+          MuscleGroup.triceps: 4,
+        }),
+        'Upper body',
+      );
+    });
+
+    test('says nothing when no muscle is known', () {
+      expect(name({}), isNull);
+      expect(name({MuscleGroup.other: 5}), isNull);
+      expect(name({MuscleGroup.chest: 0}), isNull);
+    });
+  });
+
+  group('finishing a live workout', () {
+    late AppDatabase db;
+    // The editor listens to the app lifecycle.
+    setUpAll(TestWidgetsFlutterBinding.ensureInitialized);
+    setUp(() => db = AppDatabase(NativeDatabase.memory()));
+    tearDown(() => db.close());
+
+    // The database keeps whole seconds.
+    final base = DateTime.fromMillisecondsSinceEpoch(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000 * 1000,
+    );
+
+    Future<Exercise> exercise(
+      String name,
+      MuscleGroup group, {
+      TrackingType type = TrackingType.weights,
+      LoadMode mode = LoadMode.none,
+    }) => ExerciseRepository(db).create(
+      name: name,
+      muscleGroup: group,
+      trackingType: type,
+      loadMode: mode,
+    );
+
+    WorkoutSet done(WorkoutSet s, double kg, int reps, {DateTime? at}) =>
+        s.copyWith(
+          loadKg: Value(kg),
+          reps: Value(reps),
+          isCompleted: true,
+          completedAt: Value(at),
+        );
+
+    Future<ProviderContainer> container() async {
+      final c = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          initialSettingsProvider.overrideWithValue(
+            await SettingsRepository(db).get(),
+          ),
+        ],
+      );
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    test('finish ends at an explicit time within the workout', () async {
+      final bench = await exercise('Bench press', MuscleGroup.chest);
+      final repo = WorkoutRepository(db);
+      final started = base.subtract(const Duration(hours: 3));
+
+      Future<DateTime?> endedWith(DateTime? endedAt) async {
+        final id = await repo.start();
+        await (db.update(db.workouts)..where((w) => w.id.equals(id))).write(
+          WorkoutsCompanion(startedAt: Value(started)),
+        );
+        final (_, sets) = await repo.addExercise(
+          id,
+          bench.id,
+          position: 0,
+          sets: 1,
+        );
+        await repo.writeSets([done(sets[0], 80, 5)]);
+        expect(
+          await repo.finish(id, bodyweightKg: null, endedAt: endedAt),
+          isTrue,
+        );
+        return (await repo.load(id))!.workout.endedAt;
+      }
+
+      final lastSet = started.add(const Duration(hours: 1));
+      expect(await endedWith(lastSet), lastSet);
+      expect(
+        await endedWith(started.subtract(const Duration(hours: 1))),
+        started,
+      );
+      final future = await endedWith(base.add(const Duration(hours: 2)));
+      expect(future!.isBefore(base), isFalse);
+      expect(
+        future.isBefore(DateTime.now().add(const Duration(seconds: 2))),
+        isTrue,
+      );
+      final now = await endedWith(null);
+      expect(now!.difference(DateTime.now()).inSeconds.abs(), lessThan(5));
+    });
+
+    test('finish renames only when asked to', () async {
+      final bench = await exercise('Bench press', MuscleGroup.chest);
+      final repo = WorkoutRepository(db);
+      Future<String> nameAfter(String? name) async {
+        final id = await repo.start();
+        final (_, sets) = await repo.addExercise(
+          id,
+          bench.id,
+          position: 0,
+          sets: 1,
+        );
+        await repo.writeSets([done(sets[0], 80, 5)]);
+        await repo.finish(id, bodyweightKg: null, name: name);
+        return (await repo.load(id))!.workout.name;
+      }
+
+      expect(await nameAfter(null), 'Workout');
+      expect(await nameAfter('  Chest day '), 'Chest day');
+    });
+
+    test('the editor names a default workout from its muscles', () async {
+      final bench = await exercise('Bench press', MuscleGroup.chest);
+      final curl = await exercise('Curl', MuscleGroup.biceps);
+      final pushdown = await exercise('Pushdown', MuscleGroup.triceps);
+      final repo = WorkoutRepository(db);
+      final c = await container();
+
+      Future<String> finishedName({String? renamed}) async {
+        final id = await repo.start();
+        if (renamed != null) await repo.rename(id, renamed);
+        final (_, b) = await repo.addExercise(
+          id,
+          bench.id,
+          position: 0,
+          sets: 5,
+        );
+        final (_, k) = await repo.addExercise(
+          id,
+          curl.id,
+          position: 1,
+          sets: 2,
+        );
+        final (_, p) = await repo.addExercise(
+          id,
+          pushdown.id,
+          position: 2,
+          sets: 2,
+        );
+        await repo.writeSets([
+          for (final s in [...b.take(4), ...k, ...p]) done(s, 40, 8),
+          // Warm-ups and unchecked sets don't count.
+          done(b[4], 20, 8).copyWith(setType: SetType.warmup),
+        ]);
+        await c.read(workoutEditorProvider(id).future);
+        await c.read(workoutEditorProvider(id).notifier).finish();
+        return (await repo.load(id))!.workout.name;
+      }
+
+      expect(await finishedName(), 'Chest and arms');
+      expect(await finishedName(renamed: 'Push day'), 'Push day');
+    });
+
+    test('mark all done follows the rules of ✓', () async {
+      final bench = await exercise('Bench press', MuscleGroup.chest);
+      final squat = await exercise('Squat', MuscleGroup.quads);
+      final dip = await exercise(
+        'Dip',
+        MuscleGroup.triceps,
+        type: TrackingType.bodyweight,
+        mode: LoadMode.added,
+      );
+      final row = await exercise('Row', MuscleGroup.back);
+      final repo = WorkoutRepository(db);
+      final c = await container();
+
+      // A past bench session provides the hints.
+      final past = await repo.start();
+      final (_, ps) = await repo.addExercise(
+        past,
+        bench.id,
+        position: 0,
+        sets: 3,
+      );
+      await repo.writeSets([for (final s in ps) done(s, 100, 5)]);
+      await repo.finish(past, bodyweightKg: null);
+
+      Future<int> plan() async {
+        final id = await repo.start();
+        final (_, b) = await repo.addExercise(
+          id,
+          bench.id,
+          position: 0,
+          sets: 4,
+        );
+        await repo.addExercise(id, squat.id, position: 1, sets: 2);
+        final (_, d) = await repo.addExercise(id, dip.id, position: 2, sets: 2);
+        final (_, r) = await repo.addExercise(id, row.id, position: 3, sets: 2);
+        await repo.writeSets([
+          b[0].copyWith(loadKg: const Value(105), reps: const Value(5)),
+          d[0].copyWith(reps: const Value(8)),
+          r[0].copyWith(reps: const Value(10)),
+          r[1].copyWith(loadKg: const Value(50)),
+        ]);
+        return id;
+      }
+
+      List<(bool, double?, int?, bool)> sets(int id) => [
+        for (final e
+            in c.read(workoutEditorProvider(id)).requireValue.exercises)
+          for (final s in e.sets)
+            (s.isCompleted, s.loadKg, s.reps, s.completedAt != null),
+      ];
+
+      // Tapping ✓ on every set, one by one.
+      final tapped = await plan();
+      final tapEditor = c.read(workoutEditorProvider(tapped).notifier);
+      await c.read(workoutEditorProvider(tapped).future);
+      final expected = [
+        for (final e
+            in c.read(workoutEditorProvider(tapped)).requireValue.exercises)
+          for (final s in e.sets) tapEditor.toggleDone(e.id, s.id),
+      ];
+      final byTap = sets(tapped);
+      await tapEditor.discard();
+
+      final id = await plan();
+      final editor = c.read(workoutEditorProvider(id).notifier);
+      final draft = await c.read(workoutEditorProvider(id).future);
+      expect(draft.uncheckedSets, 10);
+      expect(draft.markableSets, 7);
+      expect(c.read(restTimerProvider), isNull);
+
+      final result = editor.markAllDone();
+      expect(result, (marked: 7, skipped: 3));
+      expect(
+        expected.where((r) => r == CompleteResult.ok),
+        hasLength(result.marked),
+      );
+      // The same values as ✓, but without a time and without a rest.
+      expect(
+        [for (final (ok, load, reps, _) in sets(id)) (ok, load, reps)],
+        [for (final (ok, load, reps, _) in byTap) (ok, load, reps)],
+      );
+      expect(sets(id).where((s) => s.$4), isEmpty);
+      expect(byTap.where((s) => s.$1).every((s) => s.$4), isTrue);
+      expect(c.read(restTimerProvider), isNull);
+      expect(c.read(workoutEditorProvider(id)).requireValue.markableSets, 0);
+      expect(c.read(workoutEditorProvider(id)).requireValue.uncheckedSets, 3);
+      expect(sets(id).first, (true, 105.0, 5, false));
+      expect(sets(id)[1], (true, 100.0, 5, false));
+
+      // Marked sets are saved and counted, the rest is dropped.
+      expect(await editor.finish(), isTrue);
+      final w = (await repo.load(id))!;
+      expect(w.workout.totalSets, 7);
+      expect(w.workout.name, 'Chest and triceps');
+      expect(w.exercises.map((e) => e.exercise.name), [
+        'Bench press',
+        'Dip',
+        'Row',
+      ]);
+    });
+
+    test('rest by hand uses the exercise completed last', () async {
+      final bench = await exercise('Bench press', MuscleGroup.chest);
+      final squat = await exercise('Squat', MuscleGroup.quads);
+      final repo = WorkoutRepository(db);
+      final c = await container();
+      final id = await repo.start();
+      final (a, aSets) = await repo.addExercise(id, bench.id, position: 0);
+      final (_, bSets) = await repo.addExercise(id, squat.id, position: 1);
+      await repo.updateExercise(
+        a.id,
+        const WorkoutExercisesCompanion(restSeconds: Value(45)),
+      );
+      final provider = workoutEditorProvider(id);
+
+      // Nothing completed: the default rest from settings.
+      var draft = await c.read(provider.future);
+      expect(draft.lastSetAt, isNull);
+      expect(draft.restAfterLast(77), 77);
+      c.read(provider.notifier).startRest();
+      expect(c.read(restTimerProvider)!.totalSeconds, 90);
+
+      // The squat was last and has no rest of its own.
+      final t = DateTime(2025, 1, 1, 12);
+      await repo.writeSets([
+        done(aSets[0], 80, 5, at: t),
+        done(bSets[0], 100, 5, at: t.add(const Duration(minutes: 3))),
+      ]);
+      c.invalidate(provider);
+      draft = await c.read(provider.future);
+      expect(draft.lastSetAt, t.add(const Duration(minutes: 3)));
+      expect(draft.restAfterLast(90), 90);
+
+      // Then the bench: its own 45 s, and starting again restarts.
+      await repo.writeSets([
+        done(aSets[0], 80, 5, at: t.add(const Duration(minutes: 6))),
+      ]);
+      c.invalidate(provider);
+      draft = await c.read(provider.future);
+      expect(draft.restAfterLast(90), 45);
+      c.read(provider.notifier).startRest();
+      final rest = c.read(restTimerProvider)!;
+      expect(rest.totalSeconds, 45);
+      expect(rest.remainingSeconds(), inInclusiveRange(44, 45));
     });
   });
 
@@ -1447,6 +1937,60 @@ void main() {
       expect(container.read(settingsProvider).bodyweightKg, 79);
       await ctrl.deleteBodyweightEntry(DateTime(2025, 1, 1));
       expect(container.read(settingsProvider).bodyweightKg, isNull);
+    });
+
+    test('backdated weigh-ins keep the latest day as the current value', () async {
+      final container = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          initialSettingsProvider.overrideWithValue(
+            await SettingsRepository(db).get(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final ctrl = container.read(settingsProvider.notifier);
+      double? current() => container.read(settingsProvider).bodyweightKg;
+      Future<List<(DateTime, double)>> entries() async => [
+        for (final e in await (db.select(db.bodyweightEntries)
+              ..orderBy([(b) => OrderingTerm.asc(b.date)]))
+            .get())
+          (e.date, e.kg),
+      ];
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = DateTime(now.year, now.month, now.day - 1);
+      final older = DateTime(now.year, now.month, now.day - 3);
+
+      await ctrl.logBodyweight(80);
+      await ctrl.logBodyweight(79, date: yesterday);
+      expect(current(), 80);
+
+      // Editing an entry can move it to another day.
+      await ctrl.logBodyweight(78, date: older, replacing: yesterday);
+      expect(await entries(), [(older, 78.0), (today, 80.0)]);
+      expect(current(), 80);
+
+      // Editing the latest entry changes the current value.
+      await ctrl.logBodyweight(81, date: today, replacing: today);
+      expect(current(), 81);
+
+      // Moving onto a day with an entry replaces it.
+      await ctrl.logBodyweight(77, date: older, replacing: today);
+      expect(await entries(), [(older, 77.0)]);
+      expect(current(), 77);
+
+      // Future dates count as today.
+      await ctrl.logBodyweight(82, date: today.add(const Duration(days: 5)));
+      expect(await entries(), [(older, 77.0), (today, 82.0)]);
+      expect(current(), 82);
+
+      // Undoing a delete puts the entry back.
+      await ctrl.deleteBodyweightEntry(today);
+      expect(current(), 77);
+      await ctrl.logBodyweight(82, date: today);
+      expect(await entries(), [(older, 77.0), (today, 82.0)]);
+      expect(current(), 82);
     });
 
     test('workout insights compare with the last session', () async {

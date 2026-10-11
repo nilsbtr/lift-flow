@@ -77,6 +77,31 @@ List<WeekStats> weeklyStats(
   return [for (var i = 0; i < weeks; i++) week(addDays(first, 7 * i))];
 }
 
+/// Weeks to chart for [range], ending with the one containing [now]. "All"
+/// starts at the week of [earliest]. Never fewer than [minWeeks].
+int weeksInRange(
+  TrendRange range, {
+  required DateTime now,
+  DateTime? earliest,
+  int firstDay = DateTime.monday,
+  int minWeeks = 12,
+}) {
+  final from = range.since(now) ?? earliest;
+  if (from == null) return minWeeks;
+  final days = _daysBetween(
+    weekStart(from, firstDay),
+    weekStart(now, firstDay),
+  );
+  return math.max(minWeeks, days ~/ 7 + 1);
+}
+
+/// Whole calendar days from [a] to [b], safe across DST changes.
+int _daysBetween(DateTime a, DateTime b) => DateTime.utc(
+  b.year,
+  b.month,
+  b.day,
+).difference(DateTime.utc(a.year, a.month, a.day)).inDays;
+
 /// Consecutive weeks with at least [goal] workouts (1 when off). The current
 /// week counts once it meets the goal and never breaks the streak.
 int weekStreak(
@@ -328,16 +353,104 @@ Map<MuscleGroup, double> muscleSets(
   return out;
 }
 
-/// Average working sets per week and muscle group over the last 28 days.
+/// Weeks of data behind [setsPerMuscle]: up to 4, fewer when the first
+/// workout ([first]) is more recent than the 28-day window.
+int balanceWeeks(DateTime? first, DateTime now) {
+  if (first == null) return 4;
+  final days = _daysBetween(first, now) + 1;
+  return ((days + 6) ~/ 7).clamp(1, 4);
+}
+
+/// Average working sets per week and muscle group over the last 28 days, or
+/// over the weeks since [since] (the first workout) when that is shorter.
 Map<MuscleGroup, double> setsPerMuscle(
   Iterable<SetFact> facts, {
   required DateTime now,
+  DateTime? since,
 }) {
   final from = addDays(now, -27);
+  final weeks = balanceWeeks(
+    since ?? facts.map((f) => f.startedAt).minOrNull,
+    now,
+  );
   return muscleSets([
     for (final f in facts)
       if (!f.startedAt.isBefore(from)) (f.muscleGroup, f.secondaryMuscles),
-  ]).map((k, v) => MapEntry(k, v / 4));
+  ]).map((k, v) => MapEntry(k, v / weeks));
+}
+
+/// Bounds and default of the muscle balance band, in sets per week.
+const kBalanceLowest = 1;
+const kBalanceHighest = 50;
+const kBalanceDefault = (10, 20);
+
+/// Why a muscle balance band is invalid, or null when it is fine.
+String? balanceBandError(int? min, int? max) {
+  if (min == null || max == null) return 'Enter whole numbers';
+  if (min < kBalanceLowest || max > kBalanceHighest) {
+    return 'Use $kBalanceLowest–$kBalanceHighest sets';
+  }
+  if (min >= max) return 'The minimum must be below the maximum';
+  return null;
+}
+
+/// Totals over finished workouts, e.g. for a year or a lifetime.
+class PeriodStats {
+  const PeriodStats({
+    this.workouts = 0,
+    this.sets = 0,
+    this.volumeKg = 0,
+    this.time = Duration.zero,
+    this.days = 0,
+  });
+
+  final int workouts;
+  final int sets;
+  final double volumeKg;
+  final Duration time;
+
+  /// Distinct days with a workout.
+  final int days;
+}
+
+/// Totals of the finished [workouts] started in [year], or all of them.
+PeriodStats periodStats(Iterable<Workout> workouts, {int? year}) {
+  final ws = _finished(workouts)
+      .where((w) => year == null || w.startedAt.year == year)
+      .toList();
+  return PeriodStats(
+    workouts: ws.length,
+    sets: ws.map((w) => w.totalSets).sum,
+    volumeKg: ws.map((w) => w.totalVolumeKg).sum,
+    time: ws.map(workoutTime).fold(Duration.zero, (a, b) => a + b),
+    days: ws.map((w) => dayOf(w.startedAt)).toSet().length,
+  );
+}
+
+/// Years with a finished workout, newest first.
+List<int> workoutYears(Iterable<Workout> workouts) =>
+    _finished(workouts)
+        .map((w) => w.startedAt.year)
+        .toSet()
+        .sorted((a, b) => b - a);
+
+/// Mean of the entries within the 7 calendar days ending on each entry’s
+/// day, for [entries] sorted oldest first. Days without an entry don’t count,
+/// so gaps never drag the average down; with one entry in range it equals
+/// that entry.
+List<double> bodyweightAverages(List<BodyweightEntry> entries) {
+  final out = <double>[];
+  var from = 0;
+  var sum = 0.0;
+  for (var i = 0; i < entries.length; i++) {
+    sum += entries[i].kg;
+    final cutoff = addDays(dayOf(entries[i].date), -6);
+    while (dayOf(entries[from].date).isBefore(cutoff)) {
+      sum -= entries[from++].kg;
+    }
+    out.add(sum / (i - from + 1));
+  }
+  return out;
 }
 
 /// Exercises with the most sessions, then the most sets.

@@ -59,13 +59,15 @@ List<(double, String)> dateLabels(DateTime first, DateTime last) {
 }
 
 /// Line over time with a gradient area and, optionally, a staircase of the
-/// running best with record dots.
+/// running best with record dots. With [average] (one value per point, in the
+/// display unit) the points become faint dots and the average is the line.
 class TrendChart extends StatelessWidget {
   const TrendChart({
     super.key,
     required this.points,
     required this.semanticLabel,
     this.showRecords = true,
+    this.average,
     this.yLabel = fmtCompact,
     this.tooltip,
     this.onSelect,
@@ -76,6 +78,7 @@ class TrendChart extends StatelessWidget {
   final List<TrendPoint> points;
   final String semanticLabel;
   final bool showRecords;
+  final List<double>? average;
   final String Function(double) yLabel;
   final String Function(int)? tooltip;
   final ValueChanged<int?>? onSelect;
@@ -95,7 +98,12 @@ class TrendChart extends StatelessWidget {
       xs: xs,
       ys: ys,
       y: NiceScale(lo, hi),
-      layer: _TrendLayer(points, xs, showRecords: showRecords),
+      layer: _TrendLayer(
+        points,
+        xs,
+        showRecords: showRecords,
+        average: average,
+      ),
       semanticLabel: semanticLabel,
       xLabels: points.isEmpty
           ? const []
@@ -110,11 +118,17 @@ class TrendChart extends StatelessWidget {
 }
 
 class _TrendLayer extends ChartLayer {
-  const _TrendLayer(this.points, this.xs, {required this.showRecords});
+  const _TrendLayer(
+    this.points,
+    this.xs, {
+    required this.showRecords,
+    this.average,
+  });
 
   final List<TrendPoint> points;
   final List<double> xs;
   final bool showRecords;
+  final List<double>? average;
 
   @override
   void paint(
@@ -132,8 +146,27 @@ class _TrendLayer extends ChartLayer {
     // Everything left of this edge is drawn in.
     final edge = p.left + (p.width + 1) * t;
 
+    final avg = average;
+    final main = avg == null
+        ? pts
+        : [for (var i = 0; i < pts.length; i++) g.at(xs[i], avg[i])];
+
     if (pts.length > 1) {
-      final line = Path()..addPolygon(pts, false);
+      if (avg != null) {
+        final raw = Path()..addPolygon(pts, false);
+        final metric = raw.computeMetrics().firstOrNull;
+        if (metric != null) {
+          canvas.drawPath(
+            metric.extractPath(0, metric.length * t),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.5
+              ..strokeJoin = StrokeJoin.round
+              ..color = style.line.withValues(alpha: 0.3),
+          );
+        }
+      }
+      final line = Path()..addPolygon(main, false);
       final area = Path.from(line)
         ..lineTo(pts.last.dx, p.bottom)
         ..lineTo(pts.first.dx, p.bottom)
@@ -185,14 +218,22 @@ class _TrendLayer extends ChartLayer {
       }
     }
 
-    final all = points.length <= TrendChart.maxDots;
+    final all = avg != null || points.length <= TrendChart.maxDots;
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     for (var i = 0; i < pts.length; i++) {
       final record = showRecords && points[i].isRecord;
       if (pts[i].dx > edge || !(all || record || pts.length == 1)) continue;
-      final color = record ? style.record : style.line;
+      final color = record
+          ? style.record
+          : avg == null
+          ? style.line
+          : style.line.withValues(alpha: 0.5);
+      if (avg != null) {
+        canvas.drawCircle(pts[i], 2, Paint()..color = color);
+        continue;
+      }
       canvas
         ..drawCircle(pts[i], record ? 4.5 : 3.5, Paint()..color = style.surface)
         ..drawCircle(pts[i], record ? 3.5 : 2.5, Paint()..color = color);
@@ -210,5 +251,7 @@ class _TrendLayer extends ChartLayer {
 
   @override
   bool shouldRepaint(_TrendLayer old) =>
-      old.showRecords != showRecords || !listEquals(old.points, points);
+      old.showRecords != showRecords ||
+      !listEquals(old.points, points) ||
+      !listEquals(old.average, average);
 }

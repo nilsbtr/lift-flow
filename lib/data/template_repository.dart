@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../domain/superset_groups.dart';
 import 'database.dart';
 
 class TemplateItem {
@@ -57,6 +58,42 @@ class TemplateDetail {
   const TemplateDetail(this.template, this.items);
   final WorkoutTemplate template;
   final List<TemplateItem> items;
+}
+
+/// [items] with superset groups cleaned up: a group left with one member is
+/// dropped, groups are made of neighbors and numbered 1, 2, …
+List<TemplateItem> normalizedSupersets(List<TemplateItem> items) {
+  final groups = normalizeGroups([for (final i in items) i.supersetGroup]);
+  return [
+    for (var i = 0; i < items.length; i++)
+      if (items[i].supersetGroup == groups[i])
+        items[i]
+      else
+        items[i].copyWith(supersetGroup: () => groups[i]),
+  ];
+}
+
+/// Name for a copy of [name]: "Push copy", then "Push copy 2" and so on,
+/// cut so it fits [maxLength] and is not in [taken] (ignoring case).
+String duplicateName(
+  String name,
+  Iterable<String> taken, {
+  int maxLength = 60,
+}) {
+  final used = {for (final n in taken) n.toLowerCase()};
+  final stripped = name.replaceFirst(RegExp(r' copy( \d+)?$'), '');
+  final base = stripped.isEmpty ? name : stripped;
+  String fit(String suffix) {
+    final room = maxLength - suffix.length;
+    final b = base.length > room ? base.substring(0, room).trimRight() : base;
+    return '$b$suffix';
+  }
+
+  var candidate = fit(' copy');
+  for (var n = 2; used.contains(candidate.toLowerCase()); n++) {
+    candidate = fit(' copy $n');
+  }
+  return candidate;
 }
 
 class TemplateRepository {
@@ -165,6 +202,28 @@ class TemplateRepository {
       }
     });
     return tid;
+  });
+
+  /// Copies a template with everything on it, into the same folder and right
+  /// after the original. Returns the copy's id, or null if [id] is gone.
+  Future<int?> duplicate(int id) => _db.transaction(() async {
+    final d = await get(id);
+    if (d == null) return null;
+    final all =
+        await (_db.select(_db.workoutTemplates)..orderBy([
+              (t) => OrderingTerm.asc(t.position),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+            .get();
+    final copy = await save(
+      name: duplicateName(d.template.name, [for (final t in all) t.name]),
+      items: d.items,
+      folderId: d.template.folderId,
+    );
+    final order = [for (final t in all) t.id]
+      ..insert(all.indexWhere((t) => t.id == id) + 1, copy);
+    await reorder(order);
+    return copy;
   });
 
   Future<void> delete(int id) =>

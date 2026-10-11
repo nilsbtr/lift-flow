@@ -15,7 +15,8 @@ import '../domain/rest.dart';
 /// While the app is hidden a live workout has an ongoing notification
 /// ([_workoutId]) that stays through rests. A rest adds a countdown with Skip
 /// and +30 s ([_restId], times out by itself) and a scheduled alert
-/// ([_alertId]). Those actions run in [onNotificationAction].
+/// ([_alertId]). Those actions run in [onNotificationAction]. With the app open
+/// a rest end can play a short sound instead ([playRestSound], [_soundId]).
 class NotificationService {
   NotificationService() : _ready = false;
 
@@ -26,6 +27,7 @@ class NotificationService {
   static const _workoutId = 1;
   static const _alertId = 2;
   static const _restId = 3;
+  static const _soundId = 4;
   static const _icon = 'ic_stat_lift';
   static const _restChangedPort = 'lift_flow/rest_changed';
   static const payloadWorkout = 'workout';
@@ -167,6 +169,35 @@ class NotificationService {
         ),
       ),
     );
+  }
+
+  /// Plays the notification sound for a rest that ends while the app is open.
+  /// Android has no other system sound API, so this posts a notification on its
+  /// own channel (a sound but no pop-up, so the channel can't be the alert's)
+  /// that removes itself. The sound follows the phone's ringer mode.
+  Future<void> playRestSound() async {
+    if (!_ready) return;
+    try {
+      await _plugin.show(
+        id: _soundId,
+        title: 'Rest over',
+        body: 'Time for your next set',
+        payload: payloadWorkout,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'rest_sound',
+            'Rest over sound',
+            channelDescription: 'Short sound when a rest ends in the app',
+            icon: _icon,
+            enableVibration: false,
+            timeoutAfter: 4000,
+            visibility: NotificationVisibility.secret,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Rest sound unavailable: $e');
+    }
   }
 
   /// Shows a silent ongoing notification with elapsed workout time.

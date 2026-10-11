@@ -1,3 +1,5 @@
+import 'package:collection/collection.dart';
+
 import '../data/enums.dart';
 
 const double _eps = 1e-6;
@@ -252,13 +254,73 @@ Map<int, Set<PrKind>> computePrs(List<SetFact> facts, int workoutId) {
   current.forEach((exerciseId, now) {
     final prev = before[exerciseId];
     if (prev == null) return;
-    for (final k in PrKind.values) {
-      final a = now.valueOf(k);
-      final b = prev.valueOf(k);
-      if (a != null && b != null && a > b + _eps) {
-        (result[exerciseId] ??= {}).add(k);
-      }
-    }
+    final beaten = _beaten(now, prev);
+    if (beaten.isNotEmpty) result[exerciseId] = beaten.keys.toSet();
   });
   return result;
+}
+
+/// Kinds in which [now] beats [prev], with the new best.
+Map<PrKind, double> _beaten(ExerciseBests now, ExerciseBests prev) {
+  final out = <PrKind, double>{};
+  for (final k in PrKind.values) {
+    final a = now.valueOf(k);
+    final b = prev.valueOf(k);
+    if (a != null && b != null && a > b + _eps) out[k] = a;
+  }
+  return out;
+}
+
+/// An exercise that set at least one PR in a workout.
+class PrEvent {
+  const PrEvent({
+    required this.workoutId,
+    required this.exerciseId,
+    required this.date,
+    required this.values,
+  });
+
+  final int workoutId;
+  final int exerciseId;
+  final DateTime date;
+
+  /// The new best per kind beaten.
+  final Map<PrKind, double> values;
+}
+
+/// Every PR in [facts] (working sets of finished workouts), newest first. The
+/// rules match [computePrs]: a PR needs an earlier best to beat.
+List<PrEvent> prHistory(Iterable<SetFact> facts) {
+  final events = <PrEvent>[];
+  for (final sets in groupBy(facts, (f) => f.exerciseId).values) {
+    final ordered = sets.sorted((a, b) {
+      final c = a.startedAt.compareTo(b.startedAt);
+      return c != 0 ? c : a.workoutId.compareTo(b.workoutId);
+    });
+    ExerciseBests? before;
+    for (final session in groupBy(ordered, (f) => f.workoutId).values) {
+      final now = ExerciseBests();
+      session.forEach(now.add);
+      final prev = before;
+      if (prev != null) {
+        final beaten = _beaten(now, prev);
+        if (beaten.isNotEmpty) {
+          events.add(
+            PrEvent(
+              workoutId: session.first.workoutId,
+              exerciseId: session.first.exerciseId,
+              date: session.first.startedAt,
+              values: beaten,
+            ),
+          );
+        }
+      }
+      final bests = before ??= ExerciseBests();
+      session.forEach(bests.add);
+    }
+  }
+  return events.sorted((a, b) {
+    final c = b.date.compareTo(a.date);
+    return c != 0 ? c : b.workoutId.compareTo(a.workoutId);
+  });
 }

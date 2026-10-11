@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/enums.dart';
+import '../../domain/finish.dart';
+import '../../domain/loading.dart';
+import '../../domain/supersets.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../router.dart';
@@ -14,6 +19,7 @@ import '../../widgets/periodic_builder.dart';
 import '../gym/exercise_editor_sheet.dart';
 import '../gym/exercise_picker_sheet.dart';
 import '../history/workout_times_field.dart';
+import 'finish_dialogs.dart';
 import 'finish_summary_sheet.dart';
 import 'rest_bar.dart';
 import 'set_menu_sheet.dart';
@@ -30,6 +36,41 @@ class LiveWorkoutRoute extends ConsumerStatefulWidget {
 
 class _LiveWorkoutRouteState extends ConsumerState<LiveWorkoutRoute> {
   int? _id;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_askIfForgotten()),
+    );
+  }
+
+  /// Once per app session, asks about a workout that has run for hours.
+  Future<void> _askIfForgotten() async {
+    final id = _id;
+    final live = ref.read(liveWorkoutProvider);
+    final asked = ref.read(forgottenAskedProvider);
+    if (!mounted || id == null || live?.id != id || asked.contains(id)) return;
+    if (!looksForgotten(live!.startedAt, DateTime.now())) return;
+    asked.add(id);
+    final draft = await ref.read(workoutEditorProvider(id).future);
+    final lastSet = draft.lastSetAt;
+    if (!mounted || (draft.completedSets > 0 && lastSet == null)) return;
+    final choice = await askForgotten(
+      context,
+      running: DateTime.now().difference(live.startedAt),
+      lastSetAt: lastSet,
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case ForgottenChoice.endAtLastSet:
+        await _finishAndSummarize(context, ref, id, endedAt: lastSet);
+      case ForgottenChoice.discard:
+        await ref.read(workoutEditorProvider(id).notifier).discard();
+        if (mounted) context.go('/');
+      case ForgottenChoice.keepGoing || null:
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,13 +113,18 @@ class WorkoutScreen extends ConsumerWidget {
     }
 
     final ids = [for (final e in draft.exercises) e.id];
+    final spans = supersetSpans([
+      for (final e in draft.exercises) e.supersetGroup,
+    ]);
     final live = draft.isLive;
+    final note = draft.workout.note;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: _Title(workoutId: workoutId),
         actions: [
+          if (live) _RestButton(workoutId: workoutId),
           FilledButton(
             onPressed: () => _finish(context, ref),
             style: FilledButton.styleFrom(
@@ -91,12 +137,19 @@ class WorkoutScreen extends ConsumerWidget {
             icon: const AppIcon(AppIcons.more),
             onSelected: (v) async {
               if (v == 'rename') await _rename(context, ref, draft);
+              if (v == 'note' && context.mounted) {
+                await _editNote(context, ref, draft);
+              }
               if (v == 'discard' && context.mounted) {
                 await _discard(context, ref, live);
               }
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'rename', child: Text('Rename')),
+              PopupMenuItem(
+                value: 'note',
+                child: Text(note == null ? 'Add note' : 'Edit note'),
+              ),
               PopupMenuItem(
                 value: 'discard',
                 child: Text(
@@ -113,14 +166,24 @@ class WorkoutScreen extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 120),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         buildDefaultDragHandles: false,
-        header: live
-            ? null
-            : Column(
-                children: [
-                  WorkoutTimesField(workoutId: workoutId),
-                  _BodyweightField(workoutId: workoutId),
-                ],
+        header: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (note != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: Space.sm),
+                child: _NoteLine(
+                  note,
+                  semanticsHint: 'Edit workout note',
+                  onTap: () => _editNote(context, ref, draft),
+                ),
               ),
+            if (!live) ...[
+              WorkoutTimesField(workoutId: workoutId),
+              _BodyweightField(workoutId: workoutId),
+            ],
+          ],
+        ),
         footer: Padding(
           padding: const EdgeInsets.only(top: Space.sm),
           child: ids.isEmpty
@@ -142,15 +205,27 @@ class WorkoutScreen extends ConsumerWidget {
         itemCount: ids.length,
         onReorderItem: (from, to) =>
             ref.read(provider.notifier).reorder(from, to),
-        itemBuilder: (context, i) => Padding(
-          key: ValueKey(ids[i]),
-          padding: const EdgeInsets.only(bottom: Space.md),
-          child: _ExerciseCard(
-            workoutId: workoutId,
-            exerciseId: ids[i],
-            index: i,
-          ),
-        ),
+        itemBuilder: (context, i) {
+          final span = spans[i];
+          final linked = span != null && span.index < span.count - 1;
+          return Padding(
+            key: ValueKey(ids[i]),
+            padding: EdgeInsets.only(bottom: linked ? 0 : Space.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ExerciseCard(
+                  workoutId: workoutId,
+                  exerciseId: ids[i],
+                  index: i,
+                  superset: span,
+                  canLink: i < ids.length - 1 && !linked,
+                ),
+                if (linked) const SupersetLink(),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -185,6 +260,23 @@ class WorkoutScreen extends ConsumerWidget {
     await ref.read(workoutEditorProvider(workoutId).notifier).rename(name);
   }
 
+  Future<void> _editNote(
+    BuildContext context,
+    WidgetRef ref,
+    WorkoutDraft draft,
+  ) async {
+    final note = await askNote(
+      context,
+      title: 'Workout note',
+      hint: 'How it went, how you felt…',
+      initial: draft.workout.note ?? '',
+    );
+    if (note == null) return;
+    await ref
+        .read(workoutEditorProvider(workoutId).notifier)
+        .setWorkoutNote(note);
+  }
+
   Future<void> _discard(BuildContext context, WidgetRef ref, bool live) async {
     final ok = await confirm(
       context,
@@ -208,7 +300,6 @@ class WorkoutScreen extends ConsumerWidget {
     final editor = ref.read(workoutEditorProvider(workoutId).notifier);
     final draft = ref.read(workoutEditorProvider(workoutId)).requireValue;
     final completed = draft.completedSets;
-    final total = draft.exercises.fold(0, (n, e) => n + e.sets.length);
 
     if (!draft.isLive) {
       if (completed == 0) {
@@ -220,7 +311,7 @@ class WorkoutScreen extends ConsumerWidget {
       return;
     }
 
-    if (completed == 0) {
+    if (completed == 0 && draft.markableSets == 0) {
       final ok = await confirm(
         context,
         title: 'Nothing logged yet',
@@ -234,25 +325,62 @@ class WorkoutScreen extends ConsumerWidget {
       return;
     }
 
-    final unchecked = total - completed;
-    final ok = await confirm(
-      context,
-      title: 'Finish workout?',
-      message: unchecked > 0
-          ? '$unchecked unchecked ${unchecked == 1 ? 'set' : 'sets'} will be dropped.'
-          : null,
-      action: 'Finish',
+    if (!await showFinishDialog(context, workoutId) || !context.mounted) return;
+    final latest = ref.read(workoutEditorProvider(workoutId)).requireValue;
+    final now = DateTime.now();
+    final started = latest.workout.startedAt;
+    final lastSet = staleEnd(latest.lastSetAt, startedAt: started, now: now);
+    DateTime? endedAt;
+    if (lastSet != null) {
+      final choice = await askEndTime(
+        context,
+        startedAt: started,
+        lastSetAt: lastSet,
+        now: now,
+      );
+      if (choice == null || !context.mounted) return;
+      if (choice == EndChoice.lastSet) endedAt = lastSet;
+    }
+    await _finishAndSummarize(context, ref, workoutId, endedAt: endedAt);
+  }
+}
+
+/// Finishes the live workout, goes home and shows its summary.
+Future<void> _finishAndSummarize(
+  BuildContext context,
+  WidgetRef ref,
+  int workoutId, {
+  DateTime? endedAt,
+}) async {
+  final saved = await ref
+      .read(workoutEditorProvider(workoutId).notifier)
+      .finish(endedAt: endedAt);
+  if (!context.mounted) return;
+  context.go('/');
+  if (!saved) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final root = rootNavigatorKey.currentContext;
+    if (root == null) return;
+    showAppSheet<void>(root, (_) => FinishSummarySheet(workoutId: workoutId));
+  });
+}
+
+class _RestButton extends ConsumerWidget {
+  const _RestButton({required this.workoutId});
+  final int workoutId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final running = ref.watch(restTimerProvider.select((r) => r != null));
+    return IconButton(
+      tooltip: running ? 'Restart rest timer' : 'Start rest timer',
+      icon: AppIcon(
+        AppIcons.timer,
+        color: running ? LiftColors.of(context).rest : null,
+      ),
+      onPressed: () =>
+          ref.read(workoutEditorProvider(workoutId).notifier).startRest(),
     );
-    if (!ok) return;
-    final saved = await editor.finish();
-    if (!context.mounted) return;
-    context.go('/');
-    if (!saved) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final root = rootNavigatorKey.currentContext;
-      if (root == null) return;
-      showAppSheet<void>(root, (_) => FinishSummarySheet(workoutId: workoutId));
-    });
   }
 }
 
@@ -365,16 +493,120 @@ class _BodyweightFieldState extends ConsumerState<_BodyweightField> {
   }
 }
 
+/// A note of this workout or of an exercise in it. Tap to edit.
+class _NoteLine extends StatelessWidget {
+  const _NoteLine(this.note, {required this.semanticsHint, this.onTap});
+  final String note;
+  final String semanticsHint;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = LiftColors.of(context).muted;
+    return Semantics(
+      button: true,
+      hint: semanticsHint,
+      child: InkWell(
+        borderRadius: Radii.smAll,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.xs),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppIcon(AppIcons.note, size: IconSizes.xs, color: muted),
+              const SizedBox(width: Space.xs),
+              Expanded(
+                child: Text(note, style: Theme.of(context).textTheme.bodySmall),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Asks for the rest after a set of one exercise. Returns null on cancel and
+/// a null `seconds` to go back to [fallback], the default from settings.
+Future<({int? seconds})?> _askRest(
+  BuildContext context, {
+  required String exercise,
+  required int? current,
+  required int fallback,
+}) {
+  var seconds = current ?? fallback;
+  return showDialog<({int? seconds})>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text('Rest after $exercise'),
+      content: StatefulBuilder(
+        builder: (ctx, setState) => Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Shorter',
+              onPressed: seconds > 15
+                  ? () => setState(() => seconds -= 15)
+                  : null,
+              icon: const AppIcon(AppIcons.minus),
+            ),
+            SizedBox(
+              width: 72,
+              child: Text(
+                fmtClock(seconds),
+                textAlign: TextAlign.center,
+                style: Theme.of(ctx).textTheme.headlineSmall
+                    ?.copyWith(fontFeatures: Fonts.tabular),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Longer',
+              onPressed: seconds < 600
+                  ? () => setState(() => seconds += 15)
+                  : null,
+              icon: const AppIcon(AppIcons.plus),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (current != null)
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, (seconds: null)),
+            child: Text('Use default (${fmtClock(fallback)})'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, (seconds: seconds)),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
+
 class _ExerciseCard extends ConsumerStatefulWidget {
   const _ExerciseCard({
     required this.workoutId,
     required this.exerciseId,
     required this.index,
+    this.superset,
+    this.canLink = false,
   });
 
   final int workoutId;
   final int exerciseId;
   final int index;
+
+  /// Its place in a superset, if it is in one.
+  final ({int index, int count})? superset;
+
+  /// Whether the exercise below can be linked to this one.
+  final bool canLink;
 
   @override
   ConsumerState<_ExerciseCard> createState() => _ExerciseCardState();
@@ -383,6 +615,35 @@ class _ExerciseCard extends ConsumerStatefulWidget {
 class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
   bool? _allDone;
   bool _collapsed = false;
+
+  WorkoutEditor get _editor =>
+      ref.read(workoutEditorProvider(widget.workoutId).notifier);
+
+  Future<void> _editNote(DraftExercise ex) async {
+    final note = await askNote(
+      context,
+      title: 'Note for this workout',
+      hint: 'Only for today, e.g. left knee sore',
+      initial: ex.note ?? '',
+    );
+    if (note != null) _editor.setExerciseNote(ex.id, note);
+  }
+
+  Future<void> _replace(DraftExercise ex) async {
+    final draft = ref.read(workoutEditorProvider(widget.workoutId)).value;
+    final picked = await pickExercise(
+      context,
+      exclude: {
+        for (final e in draft?.exercises ?? const <DraftExercise>[])
+          e.exercise.id,
+      },
+    );
+    if (picked == null) return;
+    final cleared = await _editor.replaceExercise(ex.id, picked);
+    if (cleared && mounted) {
+      toast(context, 'Loads cleared to fit ${picked.name}');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -413,6 +674,20 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
     final scheme = Theme.of(context).colorScheme;
     final editor = ref.read(provider.notifier);
     final target = fmtRepsRange(ex.repsMin, ex.repsMax);
+    final (barKg, plates) = ref.watch(
+      settingsProvider.select((s) => (s.barWeightKg, s.plates)),
+    );
+    final bar = BarSetup.of(barKg, plates, unit);
+    final barbell =
+        ex.type == TrackingType.weights &&
+        ex.exercise.equipment == Equipment.barbell;
+    final warmups = ex.warmups(barKg: bar.barKg);
+    final increase = ex.increaseKg;
+    final superset = widget.superset;
+    final meta = [
+      if (target.isNotEmpty) 'Target $target reps',
+      if (ex.restSeconds case final rest?) 'Rest ${fmtClock(rest)}',
+    ].join(' · ');
 
     return Material(
       color: scheme.surface,
@@ -441,10 +716,25 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                             color: scheme.primary,
                           ),
                         ),
-                        if (target.isNotEmpty)
+                        if (superset != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Tag(
+                              '${supersetLabel(superset.count)} · '
+                              '${superset.index + 1} of ${superset.count}',
+                              color: scheme.primary,
+                            ),
+                          ),
+                        if (meta.isNotEmpty)
                           Text(
-                            'Target $target reps',
+                            meta,
                             style: t.bodySmall?.copyWith(color: lift.muted),
+                          ),
+                        if (increase != null)
+                          Text(
+                            'Every set reached ${ex.repsMax} reps last time. '
+                            'Try +${fmtWeight(increase, unit)} ${unit.label}.',
+                            style: t.bodySmall?.copyWith(color: scheme.primary),
                           ),
                         if (ex.exercise.notes case final notes?
                             when notes.isNotEmpty)
@@ -457,6 +747,12 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                                 fontStyle: FontStyle.italic,
                               ),
                             ),
+                          ),
+                        if (ex.note case final note?)
+                          _NoteLine(
+                            note,
+                            semanticsHint: 'Edit note',
+                            onTap: () => _editNote(ex),
                           ),
                       ],
                     ),
@@ -472,6 +768,22 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                         existing: ex.exercise,
                       );
                       if (updated != null) editor.refreshExercise(updated);
+                    } else if (v == 'note') {
+                      await _editNote(ex);
+                    } else if (v == 'rest') {
+                      final rest = await _askRest(
+                        context,
+                        exercise: ex.exercise.name,
+                        current: ex.restSeconds,
+                        fallback: ref.read(settingsProvider).defaultRestSeconds,
+                      );
+                      if (rest != null) editor.setRest(ex.id, rest.seconds);
+                    } else if (v == 'replace') {
+                      await _replace(ex);
+                    } else if (v == 'link') {
+                      await editor.linkWithNext(ex.id);
+                    } else if (v == 'unlink') {
+                      await editor.unlink(ex.id);
                     } else if (v == 'remove') {
                       final hasDone = ex.sets.any((s) => s.isCompleted);
                       if (hasDone &&
@@ -493,6 +805,32 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                       value: 'edit',
                       child: Text('Edit exercise'),
                     ),
+                    PopupMenuItem(
+                      value: 'note',
+                      child: Text(ex.note == null ? 'Add note' : 'Edit note'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'rest',
+                      child: Text('Rest time'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'replace',
+                      child: Text('Replace exercise'),
+                    ),
+                    if (widget.canLink)
+                      PopupMenuItem(
+                        value: 'link',
+                        child: Text(
+                          superset == null
+                              ? 'Superset with next'
+                              : 'Add next to superset',
+                        ),
+                      ),
+                    if (superset != null)
+                      const PopupMenuItem(
+                        value: 'unlink',
+                        child: Text('Remove from superset'),
+                      ),
                     PopupMenuItem(
                       value: 'remove',
                       child: Text(
@@ -557,6 +895,7 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                             unit: unit,
                             effort: effort,
                             records: records[ex.sets[i].id] ?? const {},
+                            bar: barbell ? bar : null,
                           ),
                         ),
                       Padding(
@@ -568,14 +907,34 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
                         ),
                         child: Row(
                           children: [
-                            TextButton.icon(
-                              onPressed: () => editor.addSet(ex.id),
-                              icon: const AppIcon(
-                                AppIcons.plus,
-                                size: IconSizes.sm,
+                            Flexible(
+                              child: TextButton.icon(
+                                onPressed: () => editor.addSet(ex.id),
+                                icon: const AppIcon(
+                                  AppIcons.plus,
+                                  size: IconSizes.sm,
+                                ),
+                                label: const Text('Add set'),
                               ),
-                              label: const Text('Add set'),
                             ),
+                            if (warmups.isNotEmpty)
+                              Flexible(
+                                child: Tooltip(
+                                  message: [
+                                    for (final w in warmups)
+                                      '${fmtWeight(w.loadKg, unit)} '
+                                          '$kTimes ${w.reps}',
+                                  ].join(', '),
+                                  child: TextButton.icon(
+                                    onPressed: () => editor.addWarmups(ex.id),
+                                    icon: const AppIcon(
+                                      AppIcons.plus,
+                                      size: IconSizes.sm,
+                                    ),
+                                    label: const Text('Warm-up sets'),
+                                  ),
+                                ),
+                              ),
                             const Spacer(),
                             if (allDone)
                               TextButton(

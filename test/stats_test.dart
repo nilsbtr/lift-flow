@@ -231,6 +231,167 @@ void main() {
     });
   });
 
+  group('progress cards', () {
+    test('weeksInRange covers the range, whole weeks, at least 12', () {
+      // now is Wednesday 12 March 2025.
+      expect(weeksInRange(TrendRange.m3, now: now), 14);
+      expect(weeksInRange(TrendRange.m6, now: now), 27);
+      expect(weeksInRange(TrendRange.y1, now: now), 53);
+      expect(weeksInRange(TrendRange.all, now: now), 12);
+      expect(
+        weeksInRange(TrendRange.all, now: now, earliest: DateTime(2025, 1, 1)),
+        12,
+      );
+      expect(
+        weeksInRange(TrendRange.all, now: now, earliest: DateTime(2023, 1, 4)),
+        115,
+      );
+      // The first day of the week decides where the first week starts.
+      final sunday = DateTime(2025, 3, 9);
+      expect(
+        weeksInRange(TrendRange.all, now: now, earliest: sunday, minWeeks: 1),
+        2,
+      );
+      expect(
+        weeksInRange(
+          TrendRange.all,
+          now: now,
+          earliest: sunday,
+          firstDay: DateTime.sunday,
+          minWeeks: 1,
+        ),
+        1,
+      );
+      // The data query covers the range: the oldest week is in the stats.
+      final old = workout(1, DateTime(2024, 3, 13));
+      final weeks = weeklyStats(
+        [old],
+        now: now,
+        weeks: weeksInRange(TrendRange.y1, now: now),
+      );
+      expect(weeks.length, 53);
+      expect(weeks.first.workouts, 1);
+    });
+
+    test('setsPerMuscle divides by the weeks actually covered', () {
+      List<SetFact> sets(DateTime first) => [
+        fact(1, first),
+        for (var i = 0; i < 5; i++) fact(2, DateTime(2025, 3, 10)),
+      ];
+      // First workout 4 days ago: one week of data.
+      expect(setsPerMuscle(sets(DateTime(2025, 3, 9)), now: now), {
+        MuscleGroup.chest: 6,
+      });
+      // 15 days ago: three weeks.
+      expect(setsPerMuscle(sets(DateTime(2025, 2, 26)), now: now), {
+        MuscleGroup.chest: 2,
+      });
+      // The first workout can be older than the facts passed in.
+      expect(
+        setsPerMuscle(sets(DateTime(2025, 3, 9)), now: now, since: DateTime(2024)),
+        {MuscleGroup.chest: 6 / 4},
+      );
+      expect(balanceWeeks(null, now), 4);
+      expect(balanceWeeks(DateTime(2025, 3, 12), now), 1);
+      expect(balanceWeeks(DateTime(2025, 3, 6), now), 1);
+      expect(balanceWeeks(DateTime(2025, 3, 5), now), 2);
+      expect(balanceWeeks(DateTime(2025, 2, 12), now), 4);
+    });
+
+    test('balanceBandError validates the band', () {
+      expect(balanceBandError(10, 20), isNull);
+      expect(balanceBandError(1, 2), isNull);
+      expect(balanceBandError(null, 20), isNotNull);
+      expect(balanceBandError(10, null), isNotNull);
+      expect(balanceBandError(0, 20), isNotNull);
+      expect(balanceBandError(10, 51), isNotNull);
+      expect(balanceBandError(20, 20), isNotNull);
+      expect(balanceBandError(25, 20), isNotNull);
+    });
+
+    test('periodStats totals a year or a lifetime', () {
+      final ws = [
+        workout(1, DateTime(2024, 12, 30), sets: 10, volume: 1000),
+        workout(2, DateTime(2025, 1, 2), sets: 12, volume: 2000),
+        workout(
+          3,
+          DateTime(2025, 1, 2, 18),
+          sets: 8,
+          volume: 500,
+          length: const Duration(hours: 10),
+        ),
+        workout(4, DateTime(2025, 2, 1), finished: false),
+      ];
+      final all = periodStats(ws);
+      expect(all.workouts, 3);
+      expect(all.sets, 30);
+      expect(all.volumeKg, 3500);
+      // 1 h + 1 h + the 10 h workout capped at 4 h.
+      expect(all.time, const Duration(hours: 6));
+      expect(all.days, 2);
+      final y = periodStats(ws, year: 2025);
+      expect((y.workouts, y.sets, y.days), (2, 20, 1));
+      expect(periodStats(ws, year: 2023).workouts, 0);
+      expect(workoutYears(ws), [2025, 2024]);
+      expect(workoutYears(const <Workout>[]), isEmpty);
+    });
+
+    test('bodyweightAverages uses calendar days, not entry counts', () {
+      BodyweightEntry e(int day, double kg) =>
+          BodyweightEntry(date: DateTime(2025, 3, day), kg: kg);
+      expect(
+        bodyweightAverages([e(1, 80), e(2, 82), e(4, 81), e(10, 79), e(11, 80)]),
+        [80, 81, 81, 80, 79.5],
+      );
+      // Sparse logs: gaps don't pull the average toward zero.
+      expect(bodyweightAverages([e(1, 80), e(20, 84)]), [80, 84]);
+      expect(bodyweightAverages(const []), isEmpty);
+      // Seven days including the entry's own day.
+      expect(bodyweightAverages([e(1, 80), e(7, 82)]), [80, 81]);
+      expect(bodyweightAverages([e(1, 80), e(8, 82)]), [80, 82]);
+    });
+
+    test('prHistory finds the same PRs as computePrs', () {
+      DateTime d(int n) => DateTime(2025, 1, n);
+      final facts = [
+        fact(1, d(1), load: 100),
+        fact(2, d(8), load: 110),
+        fact(3, d(15), load: 110),
+        fact(4, d(22), load: 120, reps: 8),
+        fact(2, d(8), exerciseId: 2, load: 50),
+        // A different exercise's first session is never a PR.
+        fact(5, d(29), exerciseId: 3, load: 20),
+        // Fewer reps and less weight: no PR.
+        fact(6, d(29), load: 90),
+      ];
+      final events = prHistory(facts);
+      expect([for (final e in events) (e.workoutId, e.exerciseId)], [
+        (4, 1),
+        (2, 1),
+      ]);
+      expect(events.first.date, d(22));
+      expect(events.first.values.keys, containsAll([PrKind.heaviest, PrKind.e1rm]));
+      expect(events.first.values[PrKind.heaviest], 120);
+      for (final id in [1, 2, 3, 4, 5, 6]) {
+        final byExercise = computePrs(facts, id);
+        for (final MapEntry(key: ex, value: kinds) in byExercise.entries) {
+          expect(
+            events.singleWhere((e) => e.workoutId == id && e.exerciseId == ex)
+                .values
+                .keys
+                .toSet(),
+            kinds,
+          );
+        }
+        expect(
+          events.where((e) => e.workoutId == id).length,
+          byExercise.length,
+        );
+      }
+      expect(prHistory(const []), isEmpty);
+    });
+  });
+
   group('trends', () {
     test('metricsFor by tracking and load mode', () {
       expect(metricsFor(TrackingType.weights, LoadMode.none).first,

@@ -19,12 +19,14 @@ String _typeHint(SetType t) => switch (t) {
   SetType.amrap => 'As many reps as possible',
 };
 
-/// Set type, note and delete for one set of [exercise].
+/// Set type, note and delete for one set of [exercise]. [plates] is the
+/// barbell loading for its weight, shown when given.
 Future<void> showSetMenu(
   BuildContext context, {
   required WorkoutEditor editor,
   required DraftExercise exercise,
   required int setId,
+  String? plates,
 }) async {
   final index = exercise.sets.indexWhere((s) => s.id == setId);
   if (index < 0) return;
@@ -32,14 +34,24 @@ Future<void> showSetMenu(
   final label = setLabels(exercise.sets.map((s) => s.setType))[index];
   final result = await showAppSheet<Object>(
     context,
-    (_) => _SetMenu(set.setType, set.note, setSemantics(set.setType, label)),
+    (_) => _SetMenu(
+      set.setType,
+      set.note,
+      setSemantics(set.setType, label),
+      plates,
+    ),
   );
   if (!context.mounted) return;
   switch (result) {
     case final SetType type:
       editor.setType(exercise.id, setId, type);
     case _SetAction.note:
-      final note = await _askNote(context, set.note ?? '');
+      final note = await askNote(
+        context,
+        title: 'Set note',
+        hint: 'Grip, tempo, how it felt…',
+        initial: set.note ?? '',
+      );
       if (note != null) editor.setNote(exercise.id, setId, note);
     case _SetAction.delete:
       removeSetWithUndo(context, editor, exercise.id, setId);
@@ -80,13 +92,18 @@ void removeSetWithUndo(
   );
 }
 
-/// Asks for a set note. Returns null on cancel and '' to remove the note.
-Future<String?> _askNote(BuildContext context, String initial) {
+/// Asks for a note. Returns null on cancel and '' to remove the note.
+Future<String?> askNote(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  String initial = '',
+}) {
   final ctrl = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Set note'),
+      title: Text(title),
       content: TextField(
         controller: ctrl,
         autofocus: true,
@@ -94,10 +111,7 @@ Future<String?> _askNote(BuildContext context, String initial) {
         minLines: 1,
         maxLines: 3,
         textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          hintText: 'Grip, tempo, how it felt…',
-          counterText: '',
-        ),
+        decoration: InputDecoration(hintText: hint, counterText: ''),
       ),
       actions: [
         if (initial.isNotEmpty)
@@ -122,10 +136,11 @@ Future<String?> _askNote(BuildContext context, String initial) {
 }
 
 class _SetMenu extends StatelessWidget {
-  const _SetMenu(this.type, this.note, this.title);
+  const _SetMenu(this.type, this.note, this.title, this.plates);
   final SetType type;
   final String? note;
   final String title;
+  final String? plates;
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +185,12 @@ class _SetMenu extends StatelessWidget {
                 onTap: () => Navigator.pop(context, v),
               ),
             const Divider(),
+            if (plates case final plates?)
+              ListTile(
+                leading: const AppIcon(AppIcons.dumbbell),
+                title: const Text('Plates per side'),
+                subtitle: Text(plates),
+              ),
             ListTile(
               leading: const AppIcon(AppIcons.note),
               title: Text(note == null ? 'Add note' : 'Edit note'),

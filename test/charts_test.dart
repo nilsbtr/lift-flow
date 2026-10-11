@@ -153,7 +153,84 @@ void main() {
       }
       expect(find.bySemanticsLabel('Chest: 12 sets a week'), findsOneWidget);
     });
+
+    testWidgets('long weekly ranges, averages and bands at 320 dp ($theme)', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final now = DateTime(2025, 3, 12, 18);
+      Widget weeks(int n) => WeekBarChart(
+        weeks: [for (var i = 0; i < n; i++) addDays(weekStart(now), -7 * (n - 1 - i))],
+        values: [for (var i = 0; i < n; i++) (i % 5).toDouble()],
+        goal: 3,
+        semanticLabel: 'Weeks $n',
+      );
+      final points = trend(60);
+      await tester.pumpWidget(
+        host(
+          Column(
+            children: [
+              for (final n in [14, 27, 53, 115, 520]) weeks(n),
+              TrendChart(
+                points: points,
+                average: [for (final p in points) p.value - 1],
+                showRecords: false,
+                semanticLabel: 'Average 60',
+              ),
+              TrendChart(
+                points: trend(2),
+                average: const [100, 101],
+                showRecords: false,
+                semanticLabel: 'Average 2',
+              ),
+              DotCalendar(
+                activity: dayActivity(const []),
+                now: now,
+                semanticLabel: 'Calendar',
+                labelBuilder: (w) => '$w weeks shown',
+              ),
+              const BalanceBars(
+                sets: {MuscleGroup.chest: 5, MuscleGroup.back: 9},
+                low: 4,
+                high: 8,
+              ),
+            ],
+          ),
+          dark: dark,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final n in [14, 27, 53, 115, 520]) {
+        expect(find.bySemanticsLabel('Weeks $n'), findsOneWidget);
+      }
+      expect(find.bySemanticsLabel('Average 60'), findsOneWidget);
+      expect(find.bySemanticsLabel('Average 2'), findsOneWidget);
+      // 288 dp of width fit 15 week columns.
+      expect(find.bySemanticsLabel('15 weeks shown'), findsOneWidget);
+      expect(find.bySemanticsLabel('Chest: 5 sets a week'), findsOneWidget);
+    });
   }
+
+  testWidgets('the calendar label follows the weeks shown', (tester) async {
+    Widget calendar() => host(
+      DotCalendar(
+        activity: dayActivity(const []),
+        now: DateTime(2025, 3, 12),
+        semanticLabel: 'Calendar',
+        labelBuilder: (w) => 'Last $w weeks',
+      ),
+    );
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    for (final (width, weeks) in [(120.0, 4), (320.0, 15), (1200.0, 26)]) {
+      tester.view.physicalSize = Size(width, 800);
+      await tester.pumpWidget(calendar());
+      expect(find.bySemanticsLabel('Last $weeks weeks'), findsOneWidget);
+    }
+  });
 
   testWidgets('dragging shows a tooltip until release', (tester) async {
     int? selected;

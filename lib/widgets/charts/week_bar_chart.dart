@@ -42,7 +42,9 @@ class WeekBarChart extends StatelessWidget {
     final active = done.where((v) => v > 0);
     final average = active.isEmpty ? null : active.average;
     final top = [...values, ?goal].fold(0.0, math.max);
-    final fmt = DateFormat('d MMM');
+    // Long ranges get fewer, year-qualified labels.
+    final fmt = DateFormat(n > 56 ? 'MMM yy' : 'd MMM');
+    final step = n <= 16 ? 4 : (n / 4).ceil();
     return AxisChart(
       xs: [for (var i = 0; i < n; i++) i.toDouble()],
       ys: values,
@@ -52,7 +54,8 @@ class WeekBarChart extends StatelessWidget {
       layer: _BarLayer(values, average: average, goal: goal),
       semanticLabel: semanticLabel,
       xLabels: [
-        for (var i = n - 1; i >= 0; i -= 4) (i.toDouble(), fmt.format(weeks[i])),
+        for (var i = n - 1; i >= 0; i -= step)
+          (i.toDouble(), fmt.format(weeks[i])),
       ],
       yLabel: yLabel,
       tooltip: tooltip,
@@ -80,7 +83,10 @@ class _BarLayer extends ChartLayer {
     final n = values.length;
     if (n == 0) return;
     final p = g.plot;
-    final width = math.min(p.width / n * 0.56, 20.0);
+    final width = math.max(
+      1.0,
+      math.min(p.width / n * (n > 26 ? 0.7 : 0.56), 20.0),
+    );
     for (var i = 0; i < n; i++) {
       final x = g.dx(i.toDouble());
       final h = (p.bottom - g.dy(values[i])) * t;

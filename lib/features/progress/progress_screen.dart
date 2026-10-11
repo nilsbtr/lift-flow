@@ -5,6 +5,7 @@ import 'package:intl/intl.dart' show DateFormat;
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
+import '../../domain/records.dart';
 import '../../domain/stats.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
@@ -19,10 +20,12 @@ import '../../widgets/charts/sparkline.dart';
 import '../../widgets/charts/trend_chart.dart';
 import '../../widgets/charts/week_bar_chart.dart';
 import '../../widgets/common.dart';
+import '../history/workout_day_sheet.dart';
 import 'progress_providers.dart';
 
 final _day = DateFormat('EEE, d MMM y');
 final _short = DateFormat('d MMM');
+final _shortYear = DateFormat('d MMM y');
 
 class ProgressScreen extends ConsumerWidget {
   const ProgressScreen({super.key});
@@ -56,6 +59,8 @@ class ProgressScreen extends ConsumerWidget {
             gap,
             const _BalanceCard(),
             const _TopLiftsCard(),
+            const _RecordsCard(),
+            _LifetimeCard(history),
           ],
           _BodyweightCard(weights ?? const []),
         ],
@@ -80,11 +85,6 @@ class _ConsistencyCard extends ConsumerWidget {
     final firstDay = ref.watch(
       settingsProvider.select((s) => s.firstDayOfWeek),
     );
-    final recent = weeklyStats(
-      history,
-      now: now,
-      firstDay: firstDay,
-    ).map((w) => w.workouts).sum;
 
     return ChartCard(
       title: 'Consistency',
@@ -112,17 +112,22 @@ class _ConsistencyCard extends ConsumerWidget {
             activity: dayActivity(history),
             now: now,
             firstDay: firstDay,
-            semanticLabel:
-                '${_count(recent, 'workout')} in the last 12 weeks',
-            onTapDay: (day) => showAppSheet<void>(
+            semanticLabel: 'Training calendar',
+            labelBuilder: (weeks) {
+              final recent = weeklyStats(
+                history,
+                now: now,
+                weeks: weeks,
+                firstDay: firstDay,
+              ).map((w) => w.workouts).sum;
+              return '${_count(recent, 'workout')} in the last '
+                  '${_count(weeks, 'week')}';
+            },
+            onTapDay: (day) => showWorkoutDaySheet(
               context,
-              (_) => _DaySheet(
-                day: day,
-                workouts: [
-                  for (final w in history)
-                    if (dayOf(w.startedAt) == day) w,
-                ].reversed.toList(),
-              ),
+              day: day,
+              history: history,
+              workoutPath: (id) => '/progress/workout/$id',
             ),
           ),
         ],
@@ -132,41 +137,6 @@ class _ConsistencyCard extends ConsumerWidget {
 }
 
 String _count(int n, String noun) => '$n $noun${n == 1 ? '' : 's'}';
-
-class _DaySheet extends StatelessWidget {
-  const _DaySheet({required this.day, required this.workouts});
-  final DateTime day;
-  final List<Workout> workouts;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-          child: Text(_day.format(day), style: t.titleLarge),
-        ),
-        for (final w in workouts)
-          ListTile(
-            title: Text(w.name),
-            subtitle: Text(
-              '${fmtDuration(workoutTime(w))} · ${_count(w.totalSets, 'set')}',
-            ),
-            trailing: const AppIcon(AppIcons.chevronRight),
-            onTap: () {
-              final router = GoRouter.of(context);
-              Navigator.pop(context);
-              router.go('/progress/workout/${w.id}');
-            },
-          ),
-        const SizedBox(height: Space.sm),
-      ],
-    );
-  }
-}
 
 // ------------------------------------------------------------ weekly load
 
@@ -190,15 +160,26 @@ class _WeeklyCard extends ConsumerStatefulWidget {
 
 class _WeeklyCardState extends ConsumerState<_WeeklyCard> {
   _Load _load = _Load.volume;
+  TrendRange _range = TrendRange.m3;
 
   @override
   Widget build(BuildContext context) {
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
     final goal = ref.watch(settingsProvider.select((s) => s.weeklyGoal));
+    final firstDay = ref.watch(
+      settingsProvider.select((s) => s.firstDayOfWeek),
+    );
+    final now = DateTime.now();
     final weeks = weeklyStats(
       widget.history,
-      now: DateTime.now(),
-      firstDay: ref.watch(settingsProvider.select((s) => s.firstDayOfWeek)),
+      now: now,
+      firstDay: firstDay,
+      weeks: weeksInRange(
+        _range,
+        now: now,
+        earliest: widget.history.map((w) => w.startedAt).minOrNull,
+        firstDay: firstDay,
+      ),
     );
 
     double value(WeekStats w) => switch (_load) {
@@ -237,7 +218,14 @@ class _WeeklyCardState extends ConsumerState<_WeeklyCard> {
             semanticLabel:
                 '${_load.label} per week, last ${weeks.length} weeks. '
                 'This week ${fmt(current)}.',
-            animateKey: _load,
+            animateKey: (_load, _range),
+          ),
+          const SizedBox(height: Space.md),
+          ChipChoice(
+            values: TrendRange.values,
+            selected: _range,
+            label: (r) => r.label,
+            onSelected: (r) => setState(() => _range = r),
           ),
         ],
       ),
@@ -252,19 +240,56 @@ class _BalanceCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final sets = ref.watch(muscleBalanceProvider);
-    if (sets == null || sets.isEmpty) return const SizedBox.shrink();
+    final balance = ref.watch(muscleBalanceProvider);
+    if (balance == null || balance.sets.isEmpty) return const SizedBox.shrink();
+    final (min, max) = ref.watch(
+      settingsProvider.select((s) => (s.balanceMin, s.balanceMax)),
+    );
+    final weeks = balance.weeks;
     return Padding(
       padding: const EdgeInsets.only(bottom: Space.md),
       child: ChartCard(
         title: 'Muscle balance',
+        trailing: _InfoTip(
+          'Aim for $min–$max working sets per muscle each week. Below is '
+          'light, above is heavy. Secondary muscles count half a set. '
+          'Change the band in Settings.',
+        ),
         caption:
-            'Working sets per week over the last 4 weeks. '
-            'The band marks 10–20 sets.',
-        child: BalanceBars(sets: sets),
+            'Working sets per week over '
+            '${weeks == 1 ? 'the last week' : 'the last $weeks weeks'}. '
+            'The band marks $min–$max sets.',
+        child: BalanceBars(
+          sets: balance.sets,
+          low: min.toDouble(),
+          high: max.toDouble(),
+        ),
       ),
     );
   }
+}
+
+/// An info icon that explains itself in a tooltip on tap.
+class _InfoTip extends StatelessWidget {
+  const _InfoTip(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: message,
+    triggerMode: TooltipTriggerMode.tap,
+    showDuration: const Duration(seconds: 6),
+    child: SizedBox.square(
+      dimension: kCompactTap,
+      child: Center(
+        child: AppIcon(
+          AppIcons.info,
+          size: IconSizes.sm,
+          color: LiftColors.of(context).muted,
+        ),
+      ),
+    ),
+  );
 }
 
 // ------------------------------------------------------------ top lifts
@@ -351,6 +376,236 @@ class _TopLiftsCard extends ConsumerWidget {
   }
 }
 
+// ------------------------------------------------------------ records
+
+class _RecordsCard extends ConsumerWidget {
+  const _RecordsCard();
+
+  static const _count = 5;
+
+  static TrendMetric _metricOf(PrKind k) => switch (k) {
+    PrKind.heaviest => TrendMetric.heaviest,
+    PrKind.e1rm => TrendMetric.e1rm,
+    PrKind.bestLoad => TrendMetric.bestLoad,
+    PrKind.mostReps => TrendMetric.reps,
+  };
+
+  /// The record kind to headline for an exercise, by its usual metrics.
+  static PrKind _headline(Exercise e, Map<PrKind, double> v) {
+    for (final m in metricsFor(e.trackingType, e.loadMode)) {
+      for (final k in v.keys) {
+        if (_metricOf(k) == m) return k;
+      }
+    }
+    return v.keys.first;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final events = ref.watch(prHistoryProvider).value;
+    final exercises = ref.watch(exercisesProvider).value;
+    final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    if (events == null || exercises == null) return const SizedBox.shrink();
+    final byId = {for (final e in exercises) e.id: e};
+    // Newest first, one row per exercise.
+    final seen = <int>{};
+    final latest = [
+      for (final ev in events)
+        if (byId.containsKey(ev.exerciseId) && seen.add(ev.exerciseId)) ev,
+    ].take(_count).toList();
+    if (latest.isEmpty) return const SizedBox.shrink();
+    final t = Theme.of(context).textTheme;
+    final lift = LiftColors.of(context);
+    final year = DateTime.now().year;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: ChartCard(
+        title: 'Records',
+        caption: 'Latest personal record per exercise',
+        child: Column(
+          children: [
+            for (final ev in latest)
+              InkWell(
+                borderRadius: Radii.mdAll,
+                onTap: () => context.go('/progress/exercise/${ev.exerciseId}'),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: kMinTap),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: Space.xs),
+                    child: Builder(
+                      builder: (context) {
+                        final e = byId[ev.exerciseId]!;
+                        final kind = _headline(e, ev.values);
+                        final more = ev.values.length - 1;
+                        return Row(
+                          children: [
+                            AppIcon(
+                              AppIcons.trophySolid,
+                              size: IconSizes.sm,
+                              color: lift.record,
+                            ),
+                            const SizedBox(width: Space.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(e.name, style: t.bodyLarge),
+                                  Text(
+                                    '${kind.label} '
+                                    '${fmtMetric(_metricOf(kind), ev.values[kind]!, unit)}'
+                                    '${more > 0 ? ' · +$more more' : ''}',
+                                    style: t.bodySmall?.copyWith(
+                                      color: lift.muted,
+                                      fontFeatures: Fonts.tabular,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: Space.md),
+                            Text(
+                              (ev.date.year == year ? _short : _shortYear)
+                                  .format(ev.date),
+                              style: t.bodySmall?.copyWith(color: lift.muted),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------ lifetime
+
+String _hours(Duration d) => d.inHours >= 1 ? '${d.inHours} h' : fmtDuration(d);
+
+class _LifetimeCard extends ConsumerWidget {
+  const _LifetimeCard(this.history);
+  final List<Workout> history;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final stats = periodStats(history);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.md),
+      child: ChartCard(
+        title: 'Lifetime',
+        trailing: TextButton(
+          onPressed: () =>
+              showAppSheet<void>(context, (_) => _YearSheet(history)),
+          child: const Text('Year in review'),
+        ),
+        child: _StatGrid(_periodRows(stats, unit)),
+      ),
+    );
+  }
+}
+
+List<(String, String)> _periodRows(PeriodStats s, WeightUnit unit) => [
+  (fmtCompact(s.workouts.toDouble()), 'Workouts'),
+  (fmtCompact(s.sets.toDouble()), 'Sets'),
+  ('${fmtCompact(kgToUnit(s.volumeKg, unit))} ${unit.label}', 'Volume'),
+  (_hours(s.time), 'Time'),
+];
+
+/// Value and label pairs in two columns.
+class _StatGrid extends StatelessWidget {
+  const _StatGrid(this.stats);
+  final List<(String, String)> stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final muted = LiftColors.of(context).muted;
+    Widget cell((String, String)? s) => Expanded(
+      child: s == null
+          ? const SizedBox.shrink()
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.$1,
+                  style: t.titleLarge?.copyWith(fontFeatures: Fonts.tabular),
+                ),
+                Text(s.$2, style: t.bodySmall?.copyWith(color: muted)),
+              ],
+            ),
+    );
+    return Column(
+      spacing: Space.md,
+      children: [
+        for (var i = 0; i < stats.length; i += 2)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              cell(stats[i]),
+              cell(i + 1 < stats.length ? stats[i + 1] : null),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _YearSheet extends ConsumerStatefulWidget {
+  const _YearSheet(this.history);
+  final List<Workout> history;
+
+  @override
+  ConsumerState<_YearSheet> createState() => _YearSheetState();
+}
+
+class _YearSheetState extends ConsumerState<_YearSheet> {
+  int? _year;
+
+  @override
+  Widget build(BuildContext context) {
+    final years = workoutYears(widget.history);
+    final year = _year ?? years.firstOrNull ?? DateTime.now().year;
+    final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final records = ref.watch(prHistoryProvider).value;
+    final stats = periodStats(widget.history, year: year);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Year in review', style: Theme.of(context).textTheme.titleLarge),
+          if (years.length > 1) ...[
+            const SizedBox(height: Space.md),
+            ChipChoice(
+              values: years,
+              selected: year,
+              label: (y) => '$y',
+              onSelected: (y) => setState(() => _year = y),
+            ),
+          ],
+          const SizedBox(height: Space.lg),
+          _StatGrid([
+            ..._periodRows(stats, unit),
+            ('${stats.days}', 'Training days'),
+            (
+              records == null
+                  ? '–'
+                  : '${records.where((r) => r.date.year == year).length}',
+              'Records',
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------ body weight
 
 class _BodyweightCard extends ConsumerWidget {
@@ -361,12 +616,17 @@ class _BodyweightCard extends ConsumerWidget {
 
   Future<void> _log(BuildContext context, WidgetRef ref) async {
     final settings = ref.read(settingsProvider);
-    final kg = await askBodyweight(
+    final w = await askBodyweight(
       context,
       unit: settings.weightUnit,
       initialKg: settings.bodyweightKg,
+      taken: {for (final e in entries) e.date},
     );
-    if (kg != null) await ref.read(settingsProvider.notifier).logBodyweight(kg);
+    if (w != null) {
+      await ref
+          .read(settingsProvider.notifier)
+          .logBodyweight(w.kg, date: w.date);
+    }
   }
 
   @override
@@ -376,6 +636,7 @@ class _BodyweightCard extends ConsumerWidget {
     final lift = LiftColors.of(context);
     String kg(double v) => '${fmtWeight(v, unit)} ${unit.label}';
     final last = entries.lastOrNull;
+    final avgs = bodyweightAverages(entries);
 
     return ChartCard(
       title: 'Body weight',
@@ -399,8 +660,9 @@ class _BodyweightCard extends ConsumerWidget {
             Text(
               entries.length < 2
                   ? _day.format(last.date)
-                  : '${fmtDelta(kgToUnit(last.kg - entries.first.kg, unit))} '
-                        '${unit.label} since ${_short.format(entries.first.date)}',
+                  : '${fmtDelta(kgToUnit(avgs.last - avgs.first, unit))} '
+                        '${unit.label} since ${_short.format(entries.first.date)}'
+                        ' · 7-day avg',
               style: t.bodySmall?.copyWith(color: lift.muted),
             ),
           ],
@@ -412,10 +674,20 @@ class _BodyweightCard extends ConsumerWidget {
                   TrendPoint(e.date, kgToUnit(e.kg, unit)),
               ],
               showRecords: false,
+              average: [for (final a in avgs) kgToUnit(a, unit)],
               tooltip: (i) =>
-                  '${kg(entries[i].kg)}\n${_short.format(entries[i].date)}',
+                  '${kg(entries[i].kg)}\n7-day avg ${kg(avgs[i])}\n'
+                  '${_short.format(entries[i].date)}',
               semanticLabel:
-                  'Body weight, ${entries.length} entries. Latest ${kg(last!.kg)}.',
+                  'Body weight, ${entries.length} entries. Latest ${kg(last!.kg)}, '
+                  '7-day average ${kg(avgs.last)}.',
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: Space.sm),
+              child: Text(
+                'Dots are weigh-ins. The line is the 7-day average.',
+                style: t.bodySmall?.copyWith(color: lift.muted),
+              ),
             ),
           ],
           if (entries.isNotEmpty)
@@ -435,14 +707,49 @@ class _BodyweightCard extends ConsumerWidget {
   }
 }
 
-class _EntriesSheet extends ConsumerWidget {
+class _EntriesSheet extends ConsumerStatefulWidget {
   const _EntriesSheet();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_EntriesSheet> createState() => _EntriesSheetState();
+}
+
+class _EntriesSheetState extends ConsumerState<_EntriesSheet> {
+  /// The last deleted entry, offered for undo.
+  BodyweightEntry? _deleted;
+
+  SettingsController get _ctrl => ref.read(settingsProvider.notifier);
+
+  Future<void> _edit(BodyweightEntry e, List<BodyweightEntry> all) async {
+    final w = await askBodyweight(
+      context,
+      unit: ref.read(settingsProvider).weightUnit,
+      initialKg: e.kg,
+      initialDate: e.date,
+      editing: true,
+      taken: {for (final o in all) o.date},
+    );
+    if (w != null) {
+      await _ctrl.logBodyweight(w.kg, date: w.date, replacing: e.date);
+    }
+  }
+
+  Future<void> _delete(BodyweightEntry e) async {
+    setState(() => _deleted = e);
+    await _ctrl.deleteBodyweightEntry(e.date);
+  }
+
+  Future<void> _undo(BodyweightEntry e) async {
+    setState(() => _deleted = null);
+    await _ctrl.logBodyweight(e.kg, date: e.date);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final entries = ref.watch(bodyweightEntriesProvider).value ?? const [];
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
     final t = Theme.of(context).textTheme;
+    final deleted = _deleted;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -462,17 +769,39 @@ class _EntriesSheet extends ConsumerWidget {
                     style: const TextStyle(fontFeatures: Fonts.tabular),
                   ),
                   subtitle: Text(_day.format(e.date)),
-                  trailing: IconButton(
-                    tooltip: 'Delete',
-                    icon: const AppIcon(AppIcons.trash),
-                    onPressed: () => ref
-                        .read(settingsProvider.notifier)
-                        .deleteBodyweightEntry(e.date),
+                  onTap: () => _edit(e, entries),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Edit',
+                        icon: const AppIcon(AppIcons.edit),
+                        onPressed: () => _edit(e, entries),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete',
+                        icon: const AppIcon(AppIcons.trash),
+                        onPressed: () => _delete(e),
+                      ),
+                    ],
                   ),
                 ),
             ],
           ),
         ),
+        if (deleted != null)
+          ListTile(
+            title: Text(
+              'Deleted ${_short.format(deleted.date)}',
+              style: t.bodyMedium?.copyWith(
+                color: LiftColors.of(context).muted,
+              ),
+            ),
+            trailing: TextButton(
+              onPressed: () => _undo(deleted),
+              child: const Text('Undo'),
+            ),
+          ),
         const SizedBox(height: Space.sm),
       ],
     );

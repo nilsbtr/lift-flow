@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../domain/records.dart';
+import '../../domain/supersets.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
@@ -43,6 +44,14 @@ class WorkoutDetailScreen extends ConsumerWidget {
     }
 
     final w = loaded.workout;
+    final spans = supersetSpans([
+      for (final ex in loaded.exercises) ex.row.supersetGroup,
+    ]);
+    bool linked(int i) {
+      final span = spans[i];
+      return span != null && span.index < span.count - 1;
+    }
+
     final end = w.endedAt ?? w.startedAt;
     final stats = [
       DateFormat('EEE d MMM y · HH:mm').format(w.startedAt),
@@ -113,17 +122,32 @@ class WorkoutDetailScreen extends ConsumerWidget {
             stats.join(' · '),
             style: t.bodyMedium?.copyWith(color: lift.muted),
           ),
+          if (w.note case final note?)
+            Padding(
+              padding: const EdgeInsets.only(top: Space.sm),
+              child: Text(note, style: t.bodyMedium),
+            ),
           const SizedBox(height: Space.lg),
           SessionCard(workout: loaded),
           const SizedBox(height: Space.sm),
-          for (final ex in loaded.exercises)
+          for (final (i, ex) in loaded.exercises.indexed) ...[
             Padding(
-              padding: const EdgeInsets.only(bottom: Space.sm),
+              // Cards of a superset are joined instead of spaced.
+              padding: EdgeInsets.only(bottom: linked(i) ? 0 : Space.sm),
               child: FlatCard(
                 onTap: () => context.go('$here/exercise/${ex.exercise.id}'),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (spans[i] case final span?)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: Space.xs),
+                        child: Tag(
+                          '${supersetLabel(span.count)} · '
+                          '${span.index + 1} of ${span.count}',
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
                     Row(
                       children: [
                         Expanded(
@@ -144,6 +168,11 @@ class WorkoutDetailScreen extends ConsumerWidget {
                           ),
                       ],
                     ),
+                    if (ex.row.note case final note?)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Space.xs),
+                        child: Text(note, style: t.bodyMedium),
+                      ),
                     const SizedBox(height: Space.sm),
                     SetList(
                       exercise: ex.exercise,
@@ -155,6 +184,8 @@ class WorkoutDetailScreen extends ConsumerWidget {
                 ),
               ),
             ),
+            if (linked(i)) const SupersetLink(),
+          ],
         ],
       ),
     );

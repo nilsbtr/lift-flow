@@ -13,6 +13,8 @@ import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/bodyweight_dialog.dart';
 import '../../widgets/common.dart';
+import 'balance_band_dialog.dart';
+import 'barbell_settings.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -52,12 +54,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   SettingsController get _ctrl => ref.read(settingsProvider.notifier);
 
   Future<void> _editBodyweight(UserSettings s) async {
-    final kg = await askBodyweight(
+    final w = await askBodyweight(
       context,
       unit: s.weightUnit,
       initialKg: s.bodyweightKg,
     );
-    if (kg != null) await _ctrl.logBodyweight(kg);
+    if (w != null) await _ctrl.logBodyweight(w.kg, date: w.date);
+  }
+
+  Future<void> _editBalanceBand(UserSettings s) async {
+    final band = await askBalanceBand(
+      context,
+      min: s.balanceMin,
+      max: s.balanceMax,
+    );
+    if (band == null) return;
+    await _ctrl.update(
+      AppSettingsCompanion(
+        balanceMin: Value(band.$1),
+        balanceMax: Value(band.$2),
+      ),
+    );
   }
 
   Future<void> _export() async {
@@ -242,6 +259,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 onTap: () =>
                     ref.read(notificationsProvider).requestExactAlarms(),
               ),
+            SwitchListTile(
+              title: const Text('Sound when rest is over'),
+              subtitle: const Text('While the app is open'),
+              value: s.restSound,
+              onChanged: (v) async {
+                // The sound is a notification, so Android 13+ asks first.
+                if (v) {
+                  await ref.read(notificationsProvider).requestPermission();
+                }
+                await _ctrl.update(AppSettingsCompanion(restSound: Value(v)));
+              },
+            ),
             const SectionLabel('Workout'),
             ListTile(
               title: const Text('Weekly goal'),
@@ -309,6 +338,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onChanged: (v) =>
                   _ctrl.update(AppSettingsCompanion(keepScreenOn: Value(v))),
             ),
+            const SectionLabel('Barbell'),
+            const BarbellSettings(),
             const SectionLabel('Appearance'),
             _SegmentTile<ThemePref>(
               title: 'Theme',
@@ -326,6 +357,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   ? (v) =>
                         _ctrl.update(AppSettingsCompanion(pureBlack: Value(v)))
                   : null,
+            ),
+            const SectionLabel('Progress'),
+            ListTile(
+              title: const Text('Muscle balance band'),
+              subtitle: const Text('Weekly sets per muscle on target'),
+              trailing: Text(
+                '${s.balanceMin}–${s.balanceMax} sets',
+                style: t.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              onTap: () => _editBalanceBand(s),
             ),
             const SectionLabel('Data'),
             ListTile(

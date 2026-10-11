@@ -32,6 +32,9 @@ abstract final class Motion {
 
   /// Chart draw-in.
   static const Duration chart = Duration(milliseconds: 560);
+
+  /// One-off celebration, e.g. the trophy on the finish sheet.
+  static const Duration celebrate = Duration(milliseconds: 1100);
   static const Curve curve = Curves.easeOutCubic;
 
   static Duration of(BuildContext context, Duration d) =>
