@@ -11,6 +11,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import 'exercise_editor_sheet.dart';
 import 'exercise_picker_sheet.dart';
+import 'template_folders.dart';
 
 enum GymTab { exercises, templates }
 
@@ -187,6 +188,69 @@ class _TemplateList extends ConsumerStatefulWidget {
 class _TemplateListState extends ConsumerState<_TemplateList> {
   List<TemplateDetail>? _optimistic;
 
+  /// Reorders within one section; templates elsewhere keep their place.
+  void _reorder(
+    List<TemplateDetail> all,
+    List<TemplateDetail> section,
+    int from,
+    int to,
+  ) {
+    final moved = [...section];
+    moved.insert(to, moved.removeAt(from));
+    final ids = reorderWithin(
+      [for (final d in all) d.template.id],
+      [for (final d in section) d.template.id],
+      [for (final d in moved) d.template.id],
+    );
+    final byId = {for (final d in all) d.template.id: d};
+    setState(() => _optimistic = [for (final id in ids) byId[id]!]);
+    ref.read(templateRepoProvider).reorder(ids).whenComplete(() {
+      if (mounted) setState(() => _optimistic = null);
+    });
+  }
+
+  Widget _section(List<TemplateDetail> all, List<TemplateDetail> section) =>
+      SliverReorderableList(
+        itemCount: section.length,
+        onReorderItem: (from, to) => _reorder(all, section, from, to),
+        proxyDecorator: (child, _, animation) => AnimatedBuilder(
+          animation: animation,
+          builder: (_, child) => Material(
+            elevation: Curves.easeInOut.transform(animation.value) * 6,
+            color: Colors.transparent,
+            child: child,
+          ),
+          child: child,
+        ),
+        itemBuilder: (context, i) {
+          final d = section[i];
+          return Padding(
+            key: ValueKey(d.template.id),
+            padding: const EdgeInsets.only(bottom: Space.sm),
+            child: TemplateCard(
+              detail: d,
+              onTap: () => context.push('/gym/template/${d.template.id}'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TemplateMenu(template: d.template),
+                  ReorderableDragStartListener(
+                    index: i,
+                    child: Padding(
+                      padding: const EdgeInsets.all(Space.md),
+                      child: AppIcon(
+                        AppIcons.drag,
+                        color: LiftColors.of(context).muted,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
   @override
   Widget build(BuildContext context) {
     final stream = ref.watch(templatesProvider).value;
@@ -206,42 +270,51 @@ class _TemplateListState extends ConsumerState<_TemplateList> {
         ),
       );
     }
-    return ReorderableListView.builder(
-      padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 96),
-      itemCount: templates.length,
-      buildDefaultDragHandles: false,
-      onReorderItem: (from, to) {
-        final list = [...templates];
-        list.insert(to, list.removeAt(from));
-        setState(() => _optimistic = list);
-        ref
-            .read(templateRepoProvider)
-            .reorder([for (final d in list) d.template.id])
-            .whenComplete(() {
-              if (mounted) setState(() => _optimistic = null);
-            });
-      },
-      itemBuilder: (context, i) {
-        final d = templates[i];
-        return Padding(
-          key: ValueKey(d.template.id),
-          padding: const EdgeInsets.only(bottom: Space.sm),
-          child: TemplateCard(
-            detail: d,
-            onTap: () => context.push('/gym/template/${d.template.id}'),
-            trailing: ReorderableDragStartListener(
-              index: i,
-              child: Padding(
-                padding: const EdgeInsets.all(Space.md),
-                child: AppIcon(
-                  AppIcons.drag,
-                  color: LiftColors.of(context).muted,
-                ),
+    final folders = ref.watch(templateFoldersProvider).value ?? const [];
+    final sections = groupTemplates(templates, folders);
+    final muted = Theme.of(context).textTheme.bodyMedium
+        ?.copyWith(color: LiftColors.of(context).muted);
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
+          sliver: _section(templates, sections.unfiled),
+        ),
+        for (final s in sections.folders) ...[
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.sm, 0),
+            sliver: SliverToBoxAdapter(
+              child: FolderHeader(
+                folder: s.folder,
+                count: s.templates.length,
+                onToggle: () => toggleFolder(ref, s.folder),
+                trailing: FolderMenu(folder: s.folder, folders: folders),
               ),
             ),
           ),
-        );
-      },
+          if (!s.folder.isCollapsed)
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              sliver: s.templates.isEmpty
+                  ? SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          Space.sm,
+                          0,
+                          Space.sm,
+                          Space.md,
+                        ),
+                        child: Text(
+                          'No templates in this folder',
+                          style: muted,
+                        ),
+                      ),
+                    )
+                  : _section(templates, s.templates),
+            ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 96)),
+      ],
     );
   }
 }
@@ -264,7 +337,7 @@ class TemplateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final muted = LiftColors.of(context).muted;
-    final names = detail.items.map((e) => e.exercise.name).join(' · ');
+    final names = templateSummary(detail.items);
     return FlatCard(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(

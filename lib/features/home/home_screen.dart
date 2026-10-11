@@ -7,6 +7,7 @@ import '../../data/database.dart';
 import '../../data/template_repository.dart';
 import '../../domain/history.dart';
 import '../../domain/stats.dart';
+import '../../domain/superset_groups.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
@@ -15,6 +16,7 @@ import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
 import '../../widgets/periodic_builder.dart';
 import '../gym/gym_screen.dart';
+import '../gym/template_folders.dart';
 import '../history/history_screen.dart';
 import '../history/workout_day_sheet.dart';
 import '../workout/workout_actions.dart';
@@ -43,6 +45,42 @@ class HomeScreen extends ConsumerWidget {
       final tid = w.templateId;
       if (tid != null) lastDone.putIfAbsent(tid, () => w.startedAt);
     }
+
+    Widget templateCard(TemplateDetail d) => Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+      child: TemplateCard(
+        detail: d,
+        caption: lastDone[d.template.id] == null
+            ? null
+            : 'Last done ${relativeDay(lastDone[d.template.id]!).toLowerCase()}',
+        onTap: () async {
+          final action = await showAppSheet<String>(
+            context,
+            (_) => _TemplatePreviewSheet(detail: d),
+          );
+          if (!context.mounted) return;
+          if (action == 'start') {
+            await startWorkout(context, ref, templateId: d.template.id);
+          } else if (action == 'edit') {
+            await context.push('/gym/template/${d.template.id}');
+          }
+        },
+        trailing: IconButton(
+          tooltip: 'Start ${d.template.name}',
+          onPressed: () =>
+              startWorkout(context, ref, templateId: d.template.id),
+          style: IconButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            foregroundColor: Theme.of(context).colorScheme.primary,
+          ),
+          icon: const AppIcon(AppIcons.playSolid, size: IconSizes.sm),
+        ),
+      ),
+    );
+    final sections = groupTemplates(
+      templates,
+      ref.watch(templateFoldersProvider).value ?? const [],
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Lift Flow')),
@@ -100,45 +138,20 @@ class HomeScreen extends ConsumerWidget {
                 ),
               ),
             ),
-          for (final d in templates)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.lg,
-                0,
-                Space.lg,
-                Space.sm,
-              ),
-              child: TemplateCard(
-                detail: d,
-                caption: lastDone[d.template.id] == null
-                    ? null
-                    : 'Last done ${relativeDay(lastDone[d.template.id]!).toLowerCase()}',
-                onTap: () async {
-                  final action = await showAppSheet<String>(
-                    context,
-                    (_) => _TemplatePreviewSheet(detail: d),
-                  );
-                  if (!context.mounted) return;
-                  if (action == 'start') {
-                    await startWorkout(context, ref, templateId: d.template.id);
-                  } else if (action == 'edit') {
-                    await context.push('/gym/template/${d.template.id}');
-                  }
-                },
-                trailing: IconButton(
-                  tooltip: 'Start ${d.template.name}',
-                  onPressed: () =>
-                      startWorkout(context, ref, templateId: d.template.id),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context)
-                        .colorScheme
-                        .primaryContainer,
-                    foregroundColor: Theme.of(context).colorScheme.primary,
-                  ),
-                  icon: const AppIcon(AppIcons.playSolid, size: IconSizes.sm),
+          for (final d in sections.unfiled) templateCard(d),
+          for (final s in sections.folders)
+            if (s.templates.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, 0),
+                child: FolderHeader(
+                  folder: s.folder,
+                  count: s.templates.length,
+                  onToggle: () => toggleFolder(ref, s.folder),
                 ),
               ),
-            ),
+              if (!s.folder.isCollapsed)
+                for (final d in s.templates) templateCard(d),
+            ],
         ],
       ),
     );
@@ -258,9 +271,7 @@ class _WeekStrip extends StatelessWidget {
                                 : trained.contains(i)
                                 ? lift.done
                                 : scheme.outline,
-                            width: days[i] == today
-                                ? 2
-                                : 1,
+                            width: days[i] == today ? 2 : 1,
                           ),
                         ),
                         child: Text(
@@ -344,6 +355,56 @@ class _TemplatePreviewSheet extends StatelessWidget {
   const _TemplatePreviewSheet({required this.detail});
   final TemplateDetail detail;
 
+  /// Exercise rows, with each superset in one marked block.
+  List<Widget> _rows(TextTheme t, LiftColors lift, Color accent) {
+    final items = detail.items;
+    Widget row(TemplateItem it) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: Space.sm),
+      child: Row(
+        children: [
+          Expanded(child: Text(it.exercise.name, style: t.bodyLarge)),
+          Text(
+            '${it.targetSets} $kTimes '
+            '${it.repsMin == null ? '–' : fmtRepsRange(it.repsMin, it.repsMax)}',
+            style: t.bodyMedium?.copyWith(color: lift.muted),
+          ),
+        ],
+      ),
+    );
+    final runEnd = {
+      for (final (s, e) in supersetRuns([
+        for (final i in items) i.supersetGroup,
+      ]))
+        s: e,
+    };
+    final out = <Widget>[];
+    for (var i = 0; i < items.length;) {
+      final end = runEnd[i];
+      if (end == null) {
+        out.add(row(items[i++]));
+        continue;
+      }
+      out.add(
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: Space.xs),
+          padding: const EdgeInsets.only(left: Space.md),
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: accent, width: 3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Superset', style: t.labelSmall?.copyWith(color: accent)),
+              for (var k = i; k < end; k++) row(items[k]),
+            ],
+          ),
+        ),
+      );
+      i = end;
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -376,24 +437,7 @@ class _TemplatePreviewSheet extends StatelessWidget {
             Flexible(
               child: ListView(
                 shrinkWrap: true,
-                children: [
-                  for (final it in detail.items)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: Space.sm),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(it.exercise.name, style: t.bodyLarge),
-                          ),
-                          Text(
-                            '${it.targetSets} $kTimes '
-                            '${it.repsMin == null ? '–' : fmtRepsRange(it.repsMin, it.repsMax)}',
-                            style: t.bodyMedium?.copyWith(color: lift.muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
+                children: _rows(t, lift, Theme.of(context).colorScheme.primary),
               ),
             ),
             const SizedBox(height: Space.lg),
