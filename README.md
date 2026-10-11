@@ -8,7 +8,7 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 - **Rest timer**: starts automatically after each set, with ±15 s and Skip. In the background, an ongoing workout notification stays up and a rest countdown adds Skip and +30 s buttons that also work from the lock screen. An alert fires when the rest ends.
 - **Templates**: reusable workouts with target sets and rep ranges. Create one from scratch or from a finished workout.
 - **Exercises**: weights or bodyweight, filed under a muscle group (required, with optional secondary muscles), with equipment and per-side or per-dumbbell loads that count in volume. The picker lists recent and frequent exercises first and matches loosely (“db bench”). The exercise page shows a rep-max table and links each session to its workout. Bodyweight exercises can track added or assisted load. An exercise that has logged sets is archived instead of deleted.
-- **History & records**: workouts grouped by month, a weekly strip on Home (weeks start on Monday, Sunday, or Saturday), per-exercise history, and PRs (heaviest, best e1RM, best load, most reps).
+- **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps).
 - **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, rest defaults, keep screen on, and JSON backup export/import.
 
 ## Tech stack

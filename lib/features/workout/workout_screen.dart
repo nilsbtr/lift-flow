@@ -12,6 +12,7 @@ import '../../widgets/common.dart';
 import '../../widgets/periodic_builder.dart';
 import '../gym/exercise_editor_sheet.dart';
 import '../gym/exercise_picker_sheet.dart';
+import '../history/workout_times_field.dart';
 import 'finish_summary_sheet.dart';
 import 'rest_bar.dart';
 import 'set_row.dart';
@@ -110,7 +111,14 @@ class WorkoutScreen extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 120),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         buildDefaultDragHandles: false,
-        header: live ? null : _BodyweightField(workoutId: workoutId),
+        header: live
+            ? null
+            : Column(
+                children: [
+                  WorkoutTimesField(workoutId: workoutId),
+                  _BodyweightField(workoutId: workoutId),
+                ],
+              ),
         footer: Padding(
           padding: const EdgeInsets.only(top: Space.sm),
           child: ids.isEmpty

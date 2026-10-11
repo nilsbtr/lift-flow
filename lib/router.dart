@@ -8,6 +8,7 @@ import 'features/gym/template_editor_screen.dart';
 import 'features/gym/exercise_detail_screen.dart';
 import 'features/gym/gym_screen.dart';
 import 'features/history/history_screen.dart';
+import 'features/history/log_workout_route.dart';
 import 'features/history/workout_detail_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/progress/progress_screen.dart';
@@ -41,6 +42,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     parentNavigatorKey: rootNavigatorKey,
                     builder: (_, _) => const LiveWorkoutRoute(),
                   ),
+                  _workoutRoute('workouts/:workoutId'),
                 ],
               ),
             ],
@@ -50,7 +52,15 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/history',
                 builder: (_, _) => const HistoryScreen(),
-                routes: [_workoutRoute(':workoutId')],
+                routes: [
+                  GoRoute(
+                    path: 'log/:workoutId',
+                    parentNavigatorKey: rootNavigatorKey,
+                    builder: (_, s) =>
+                        LogWorkoutRoute(workoutId: _param(s, 'workoutId')),
+                  ),
+                  _workoutRoute(':workoutId'),
+                ],
               ),
             ],
           ),

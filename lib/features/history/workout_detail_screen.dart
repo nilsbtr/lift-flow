@@ -10,6 +10,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/common.dart';
+import '../workout/workout_actions.dart';
 import 'session_card.dart';
 
 class WorkoutDetailScreen extends ConsumerWidget {
@@ -65,7 +66,9 @@ class WorkoutDetailScreen extends ConsumerWidget {
           PopupMenuButton<String>(
             icon: const AppIcon(AppIcons.more),
             onSelected: (v) async {
-              if (v == 'template') {
+              if (v == 'again') {
+                await startWorkout(context, ref, repeat: w);
+              } else if (v == 'template') {
                 final items = await ref
                     .read(templateRepoProvider)
                     .itemsFromWorkout(workoutId);
@@ -85,6 +88,7 @@ class WorkoutDetailScreen extends ConsumerWidget {
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'again', child: Text('Do again')),
               const PopupMenuItem(
                 value: 'template',
                 child: Text('Save as template'),
