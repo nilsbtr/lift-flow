@@ -133,7 +133,7 @@ class _ExerciseList extends ConsumerWidget {
           return ListTile(
             key: ValueKey(r.id),
             title: Text(r.name),
-            subtitle: Text(exerciseTypeLabel(r)),
+            subtitle: Text(exerciseSubtitle(r)),
             trailing: const AppIcon(AppIcons.chevronRight),
             onTap: () => context.go('/gym/exercise/${r.id}'),
           );

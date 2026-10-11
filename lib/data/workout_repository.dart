@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../domain/exercise_search.dart';
 import '../domain/records.dart';
 import 'database.dart';
 
@@ -154,6 +155,28 @@ class WorkoutRepository {
       }
       return [for (final v in byWorkout.values) ExerciseSession(v.$1, v.$2)];
     });
+  }
+
+  /// Finished sessions per exercise, for ranking the picker.
+  Stream<Map<int, ExerciseUsage>> watchExerciseUsage() {
+    final sessions = _w.id.count(distinct: true);
+    final last = _w.startedAt.max();
+    final q =
+        _db.selectOnly(_we).join([
+            innerJoin(_w, _w.id.equalsExp(_we.workoutId)),
+          ])
+          ..addColumns([_we.exerciseId, sessions, last])
+          ..where(_w.endedAt.isNotNull())
+          ..groupBy([_we.exerciseId]);
+    return q.watch().map(
+      (rows) => {
+        for (final r in rows)
+          r.read(_we.exerciseId)!: ExerciseUsage(
+            r.read(sessions)!,
+            r.read(last)!,
+          ),
+      },
+    );
   }
 
   /// Completed working sets from finished workouts for the given exercises.
