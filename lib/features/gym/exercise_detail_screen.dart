@@ -204,7 +204,7 @@ class ExerciseDetailScreen extends ConsumerWidget {
                       s.sets
                           .map(
                             (set) =>
-                                '${set.isWarmup ? 'W ' : ''}${fmtSet(
+                                '${set.setType.isWarmup ? 'W ' : ''}${fmtSet(
                                   type: exercise.trackingType,
                                   mode: exercise.loadMode,
                                   loadKg: set.loadKg,

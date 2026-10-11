@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../data/enums.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
@@ -62,10 +63,10 @@ void toast(BuildContext context, String message) {
     ..showSnackBar(SnackBar(content: Text(message)));
 }
 
-/// "W" for warm-ups; working sets are numbered from 1.
-List<String> setLabels(Iterable<bool> warmups) {
+/// "W" for warm-ups; working sets of any other type are numbered from 1.
+List<String> setLabels(Iterable<SetType> types) {
   var n = 0;
-  return [for (final w in warmups) w ? 'W' : '${++n}'];
+  return [for (final t in types) t.isWarmup ? t.letter : '${++n}'];
 }
 
 class SectionLabel extends StatelessWidget {

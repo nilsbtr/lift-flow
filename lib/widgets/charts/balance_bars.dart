@@ -17,13 +17,19 @@ class BalanceBars extends StatelessWidget {
   final double low;
   final double high;
 
+  /// Always listed. Other groups, including the legacy arms and legs, only
+  /// show up when they have sets.
   static const _main = [
     MuscleGroup.chest,
     MuscleGroup.back,
     MuscleGroup.shoulders,
-    MuscleGroup.arms,
-    MuscleGroup.legs,
+    MuscleGroup.biceps,
+    MuscleGroup.triceps,
     MuscleGroup.core,
+    MuscleGroup.quads,
+    MuscleGroup.hamstrings,
+    MuscleGroup.glutes,
+    MuscleGroup.calves,
   ];
 
   @override

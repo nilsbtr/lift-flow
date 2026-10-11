@@ -16,8 +16,10 @@ DateTime dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
 DateTime addDays(DateTime d, int days) =>
     DateTime(d.year, d.month, d.day + days);
 
-/// Monday of the week containing [d], at local midnight.
-DateTime weekStart(DateTime d) => addDays(d, 1 - d.weekday);
+/// First day of the week containing [d], at local midnight. [firstDay] is
+/// [DateTime.monday] … [DateTime.sunday].
+DateTime weekStart(DateTime d, [int firstDay = DateTime.monday]) =>
+    addDays(d, -((d.weekday - firstDay) % 7));
 
 /// Workout time is capped so a forgotten finish doesn't skew the totals.
 const kMaxWorkoutTime = Duration(hours: 4);
@@ -53,11 +55,12 @@ List<WeekStats> weeklyStats(
   Iterable<Workout> workouts, {
   required DateTime now,
   int weeks = 12,
+  int firstDay = DateTime.monday,
 }) {
-  final first = addDays(weekStart(now), -7 * (weeks - 1));
+  final first = addDays(weekStart(now, firstDay), -7 * (weeks - 1));
   final byWeek = groupBy(
     _finished(workouts).where((w) => !w.startedAt.isBefore(first)),
-    (w) => weekStart(w.startedAt),
+    (w) => weekStart(w.startedAt, firstDay),
   );
   WeekStats week(DateTime start) {
     final ws = byWeek[start];
@@ -76,13 +79,18 @@ List<WeekStats> weeklyStats(
 
 /// Consecutive weeks with at least [goal] workouts (1 when off). The current
 /// week counts once it meets the goal and never breaks the streak.
-int weekStreak(Iterable<Workout> workouts, {required DateTime now, int? goal}) {
+int weekStreak(
+  Iterable<Workout> workouts, {
+  required DateTime now,
+  int? goal,
+  int firstDay = DateTime.monday,
+}) {
   final need = goal ?? 1;
   final counts = _finished(workouts).groupFoldBy<DateTime, int>(
-    (w) => weekStart(w.startedAt),
+    (w) => weekStart(w.startedAt, firstDay),
     (n, _) => (n ?? 0) + 1,
   );
-  var week = weekStart(now);
+  var week = weekStart(now, firstDay);
   var streak = (counts[week] ?? 0) >= need ? 1 : 0;
   while ((counts[week = addDays(week, -7)] ?? 0) >= need) {
     streak++;
@@ -194,16 +202,7 @@ double? metricValue(TrendMetric metric, Iterable<SetFact> sets) {
           .where((f) => (f.loadKg ?? 0) >= -1e-6)
           .map((f) => f.reps!.toDouble())
           .maxOrNull,
-    TrendMetric.volume => switch (valid
-        .map(
-          (f) => setVolume(
-            type: f.type,
-            loadKg: f.loadKg,
-            reps: f.reps,
-            bodyweightKg: f.bodyweightKg,
-          ),
-        )
-        .sum) {
+    TrendMetric.volume => switch (valid.map((f) => f.volume).sum) {
       final v when v > 0 => v,
       _ => null,
     },
@@ -263,7 +262,7 @@ double? sessionDelta(List<SessionPoint> series, int workoutId) {
 List<SetFact> sessionFacts(Exercise e, Iterable<ExerciseSession> sessions) => [
   for (final s in sessions)
     for (final set in s.sets)
-      if (!set.isWarmup)
+      if (!set.setType.isWarmup)
         SetFact(
           workoutId: s.workout.id,
           startedAt: s.workout.startedAt,
@@ -274,6 +273,9 @@ List<SetFact> sessionFacts(Exercise e, Iterable<ExerciseSession> sessions) => [
           reps: set.reps,
           bodyweightKg: s.workout.bodyweightKg,
           muscleGroup: e.muscleGroup,
+          secondaryMuscles: e.secondaryMuscles,
+          perSide: e.perSide,
+          perDumbbell: e.perDumbbell,
         ),
 ];
 
@@ -308,16 +310,34 @@ TrendRange defaultRange(
 
 // ------------------------------------------------------------ summaries
 
+/// Share of a set credited to a secondary muscle group.
+const kSecondaryShare = 0.5;
+
+/// Sets per muscle group: a set counts fully for its primary group and
+/// [kSecondaryShare] for each secondary one.
+Map<MuscleGroup, double> muscleSets(
+  Iterable<(MuscleGroup, List<MuscleGroup>)> sets,
+) {
+  final out = <MuscleGroup, double>{};
+  for (final (primary, secondary) in sets) {
+    out[primary] = (out[primary] ?? 0) + 1;
+    for (final g in secondary) {
+      if (g != primary) out[g] = (out[g] ?? 0) + kSecondaryShare;
+    }
+  }
+  return out;
+}
+
 /// Average working sets per week and muscle group over the last 28 days.
 Map<MuscleGroup, double> setsPerMuscle(
   Iterable<SetFact> facts, {
   required DateTime now,
 }) {
   final from = addDays(now, -27);
-  return groupBy(
-    facts.where((f) => !f.startedAt.isBefore(from)),
-    (f) => f.muscleGroup,
-  ).map((k, v) => MapEntry(k, v.length / 4));
+  return muscleSets([
+    for (final f in facts)
+      if (!f.startedAt.isBefore(from)) (f.muscleGroup, f.secondaryMuscles),
+  ]).map((k, v) => MapEntry(k, v / 4));
 }
 
 /// Exercises with the most sessions, then the most sets.
@@ -335,16 +355,12 @@ List<int> topLifts(Iterable<SetFact> facts, {int count = 4}) {
 }
 
 /// Completed working sets per muscle group in one workout.
-Map<MuscleGroup, int> muscleSplit(LoadedWorkout w) => {
-  for (final MapEntry(:key, :value) in groupBy(
-    w.exercises,
-    (e) => e.exercise.muscleGroup,
-  ).entries)
-    key: value
-        .expand((e) => e.sets)
-        .where((s) => s.isCompleted && !s.isWarmup)
-        .length,
-}..removeWhere((_, n) => n == 0);
+Map<MuscleGroup, double> muscleSplit(LoadedWorkout w) => muscleSets([
+  for (final e in w.exercises)
+    for (final s in e.sets)
+      if (s.isCompleted && !s.setType.isWarmup)
+        (e.exercise.muscleGroup, e.exercise.secondaryMuscles),
+]);
 
 class TimelineMark {
   const TimelineMark(this.at, this.lane, {this.warmup = false});
@@ -366,7 +382,7 @@ List<TimelineMark> sessionTimeline(LoadedWorkout w) {
       for (final s in ex.sets)
         if (s.completedAt case final at?
             when s.isCompleted && !at.isBefore(start) && !at.isAfter(end))
-          TimelineMark(at, lane, warmup: s.isWarmup),
+          TimelineMark(at, lane, warmup: s.setType.isWarmup),
   ].sortedBy((m) => m.at);
 }
 

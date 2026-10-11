@@ -277,6 +277,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 ],
               ),
             ),
+            _SegmentTile<int>(
+              title: 'First day of week',
+              values: const [
+                DateTime.monday,
+                DateTime.sunday,
+                DateTime.saturday,
+              ],
+              selected: s.firstDayOfWeek,
+              label: (v) => switch (v) {
+                DateTime.sunday => 'Sun',
+                DateTime.saturday => 'Sat',
+                _ => 'Mon',
+              },
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(firstDayOfWeek: Value(v))),
+            ),
             SwitchListTile(
               title: const Text('Keep screen on'),
               subtitle: const Text('While a workout is running'),

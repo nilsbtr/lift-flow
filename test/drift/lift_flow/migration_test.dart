@@ -9,6 +9,7 @@ import 'generated/schema.dart';
 
 import 'generated/schema_v1.dart' as v1;
 import 'generated/schema_v2.dart' as v2;
+import 'generated/schema_v3.dart' as v3;
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -110,6 +111,171 @@ void main() {
         expect(set.loadKg, 100);
         expect(set.isWarmup, 0);
         expect(await newDb.select(newDb.workouts).get(), hasLength(6));
+      },
+    );
+  });
+
+  test('v2 to v3 converts warm-ups and remaps legacy muscle groups', () async {
+    final at = DateTime(2025, 1, 1, 18).millisecondsSinceEpoch ~/ 1000;
+    v2.ExercisesData exercise(int id, String name, String group) =>
+        v2.ExercisesData(
+          id: id,
+          name: name,
+          muscleGroup: group,
+          trackingType: 'weights',
+          loadMode: 'none',
+          isArchived: 0,
+          createdAt: at,
+        );
+    v2.WorkoutSetsData set(int id, int warmup) => v2.WorkoutSetsData(
+      id: id,
+      workoutExerciseId: 1,
+      position: id - 1,
+      loadKg: 40.0 * id,
+      reps: 5,
+      isCompleted: 1,
+      completedAt: at + id,
+      isWarmup: warmup,
+    );
+
+    await verifier.testWithDataIntegrity(
+      oldVersion: 2,
+      newVersion: 3,
+      createOld: v2.DatabaseAtV2.new,
+      createNew: v3.DatabaseAtV3.new,
+      openTestedDatabase: AppDatabase.new,
+      createItems: (batch, oldDb) {
+        batch.insertAll(oldDb.exercises, [
+          exercise(1, 'Barbell Curl', 'arms'),
+          exercise(2, 'Triceps push-down', 'arms'),
+          exercise(3, 'Dips', 'arms'),
+          exercise(4, 'Back squat', 'legs'),
+          exercise(5, 'Romanian deadlift', 'legs'),
+          exercise(6, 'Hip thrust', 'legs'),
+          exercise(7, 'Calf raise', 'legs'),
+          exercise(8, 'Sled push', 'legs'),
+          exercise(9, 'Leg curl', 'other'),
+        ]);
+        batch.insert(
+          oldDb.workoutTemplates,
+          const v2.WorkoutTemplatesData(id: 1, name: 'Arms', position: 0),
+        );
+        batch.insert(
+          oldDb.templateExercises,
+          const v2.TemplateExercisesData(
+            id: 1,
+            templateId: 1,
+            exerciseId: 1,
+            position: 0,
+            targetSets: 3,
+            repsMin: 8,
+            repsMax: 12,
+          ),
+        );
+        batch.insert(
+          oldDb.workouts,
+          v2.WorkoutsData(
+            id: 1,
+            templateId: 1,
+            name: 'Arms',
+            startedAt: at,
+            endedAt: at + 3600,
+            bodyweightKg: 80,
+            totalSets: 2,
+            totalVolumeKg: 1000,
+            exerciseCount: 1,
+          ),
+        );
+        batch.insert(
+          oldDb.workoutExercises,
+          const v2.WorkoutExercisesData(
+            id: 1,
+            workoutId: 1,
+            exerciseId: 1,
+            position: 0,
+            targetRepsMin: 8,
+          ),
+        );
+        batch.insertAll(oldDb.workoutSets, [set(1, 1), set(2, 0), set(3, 0)]);
+        batch.insert(
+          oldDb.appSettings,
+          const v2.AppSettingsData(
+            id: 1,
+            weightUnit: 'lb',
+            themeMode: 'dark',
+            pureBlack: 1,
+            bodyweightKg: 80,
+            defaultRestSeconds: 120,
+            autoStartRest: 0,
+            restAlerts: 1,
+            keepScreenOn: 1,
+            permissionsPrompted: 1,
+            weeklyGoal: 4,
+          ),
+        );
+      },
+      validateItems: (newDb) async {
+        final exercises = await newDb.select(newDb.exercises).get();
+        expect({for (final e in exercises) e.id: e.muscleGroup}, {
+          1: 'biceps',
+          2: 'triceps',
+          3: 'arms',
+          4: 'quads',
+          5: 'hamstrings',
+          6: 'glutes',
+          7: 'calves',
+          8: 'legs',
+          9: 'other',
+        });
+        final e = exercises.first;
+        expect(e.name, 'Barbell Curl');
+        expect((e.equipment, e.perSide, e.perDumbbell, e.secondaryMuscles), (
+          'none',
+          0,
+          0,
+          '',
+        ));
+
+        final sets = await newDb.select(newDb.workoutSets).get();
+        expect(
+          [for (final s in sets) s.setType],
+          ['warmup', 'normal', 'normal'],
+        );
+        expect([for (final s in sets) s.loadKg], [40, 80, 120]);
+        expect([for (final s in sets) s.completedAt], [at + 1, at + 2, at + 3]);
+        expect(sets.every((s) => s.isCompleted == 1 && s.reps == 5), isTrue);
+        expect(sets.every((s) => s.rpe == null && s.note == null), isTrue);
+
+        final w = await newDb.select(newDb.workouts).getSingle();
+        expect((w.totalSets, w.totalVolumeKg, w.note), (2, 1000, null));
+        final we = await newDb.select(newDb.workoutExercises).getSingle();
+        expect((we.targetRepsMin, we.restSeconds, we.supersetGroup), (
+          8,
+          null,
+          null,
+        ));
+        final tpl = await newDb.select(newDb.workoutTemplates).getSingle();
+        expect((tpl.name, tpl.folderId), ('Arms', null));
+        final item = await newDb.select(newDb.templateExercises).getSingle();
+        expect((item.repsMin, item.repsMax, item.restSeconds), (8, 12, null));
+        expect(await newDb.select(newDb.templateFolders).get(), isEmpty);
+        expect(await newDb.select(newDb.progressPhotos).get(), isEmpty);
+
+        final s = await newDb.select(newDb.appSettings).getSingle();
+        expect((s.weightUnit, s.themeMode, s.weeklyGoal, s.autoStartRest), (
+          'lb',
+          'dark',
+          4,
+          0,
+        ));
+        expect((s.effortMode, s.firstDayOfWeek, s.balanceMin, s.balanceMax), (
+          'off',
+          1,
+          10,
+          20,
+        ));
+        expect((s.reminderDays, s.reminderMinutes, s.appLock), (0, 1080, 0));
+        expect((s.barWeightKg, s.plates, s.lastBackupAt), (null, null, null));
       },
     );
   });

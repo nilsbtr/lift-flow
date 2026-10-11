@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/enums.dart';
+import '../../domain/units.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import 'chart_style.dart';
@@ -9,7 +10,8 @@ import 'chart_style.dart';
 class SplitBar extends StatelessWidget {
   const SplitBar({super.key, required this.split});
 
-  final Map<MuscleGroup, int> split;
+  /// Sets per group. Secondary muscles add fractions.
+  final Map<MuscleGroup, double> split;
 
   @override
   Widget build(BuildContext context) {
@@ -22,9 +24,10 @@ class SplitBar extends StatelessWidget {
     ];
     if (groups.isEmpty) return const SizedBox.shrink();
     Color color(MuscleGroup g) => style.category(groups.indexOf(g));
+    String count(MuscleGroup g) => fmtNum(split[g]!);
     return Semantics(
       container: true,
-      label: [for (final g in groups) '${g.label} ${split[g]} sets'].join(', '),
+      label: [for (final g in groups) '${g.label} ${count(g)} sets'].join(', '),
       child: ExcludeSemantics(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,7 +42,7 @@ class SplitBar extends StatelessWidget {
                   children: [
                     for (final g in groups)
                       Expanded(
-                        flex: split[g]!,
+                        flex: (split[g]! * 2).round(),
                         child: ColoredBox(color: color(g)),
                       ),
                   ],
@@ -67,7 +70,7 @@ class SplitBar extends StatelessWidget {
                       Text(g.label, style: t.bodySmall),
                       const SizedBox(width: Space.xs),
                       Text(
-                        '${split[g]}',
+                        count(g),
                         style: t.bodySmall?.copyWith(color: muted),
                       ),
                     ],

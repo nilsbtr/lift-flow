@@ -8,22 +8,48 @@ class TemplateItem {
     required this.targetSets,
     this.repsMin,
     this.repsMax,
+    this.restSeconds,
+    this.targetWeightKg,
+    this.supersetGroup,
   });
+
+  TemplateItem.fromRow(TemplateExercise row, this.exercise)
+    : targetSets = row.targetSets,
+      repsMin = row.repsMin,
+      repsMax = row.repsMax,
+      restSeconds = row.restSeconds,
+      targetWeightKg = row.targetWeightKg,
+      supersetGroup = row.supersetGroup;
 
   final Exercise exercise;
   final int targetSets;
   final int? repsMin;
   final int? repsMax;
 
+  /// Null uses the default rest from settings.
+  final int? restSeconds;
+  final double? targetWeightKg;
+
+  /// Items of one template sharing a value form a superset.
+  final int? supersetGroup;
+
   TemplateItem copyWith({
     int? targetSets,
     int? Function()? repsMin,
     int? Function()? repsMax,
+    int? Function()? restSeconds,
+    double? Function()? targetWeightKg,
+    int? Function()? supersetGroup,
   }) => TemplateItem(
     exercise: exercise,
     targetSets: targetSets ?? this.targetSets,
     repsMin: repsMin != null ? repsMin() : this.repsMin,
     repsMax: repsMax != null ? repsMax() : this.repsMax,
+    restSeconds: restSeconds != null ? restSeconds() : this.restSeconds,
+    targetWeightKg: targetWeightKg != null
+        ? targetWeightKg()
+        : this.targetWeightKg,
+    supersetGroup: supersetGroup != null ? supersetGroup() : this.supersetGroup,
   );
 }
 
@@ -36,6 +62,8 @@ class TemplateDetail {
 class TemplateRepository {
   TemplateRepository(this._db);
   final AppDatabase _db;
+
+  $TemplateFoldersTable get _f => _db.templateFolders;
 
   /// All templates with their items, ordered by position.
   Stream<List<TemplateDetail>> watchAll() {
@@ -59,14 +87,7 @@ class TemplateRepository {
         final row = r.readTableOrNull(te);
         final ex = r.readTableOrNull(e);
         if (row != null && ex != null) {
-          entry.$2.add(
-            TemplateItem(
-              exercise: ex,
-              targetSets: row.targetSets,
-              repsMin: row.repsMin,
-              repsMax: row.repsMax,
-            ),
-          );
+          entry.$2.add(TemplateItem.fromRow(row, ex));
         }
       }
       return [for (final v in byId.values) TemplateDetail(v.$1, v.$2)];
@@ -89,20 +110,17 @@ class TemplateRepository {
             .get();
     return TemplateDetail(tpl, [
       for (final r in rows)
-        TemplateItem(
-          exercise: r.readTable(e),
-          targetSets: r.readTable(te).targetSets,
-          repsMin: r.readTable(te).repsMin,
-          repsMax: r.readTable(te).repsMax,
-        ),
+        TemplateItem.fromRow(r.readTable(te), r.readTable(e)),
     ]);
   }
 
-  /// Creates or replaces a template. Returns its id.
+  /// Creates or replaces a template. Returns its id. [folderId] only applies
+  /// to a new template; use [moveToFolder] for an existing one.
   Future<int> save({
     int? id,
     required String name,
     required List<TemplateItem> items,
+    int? folderId,
   }) => _db.transaction(() async {
     final n = name.trim();
     var tid = id;
@@ -117,6 +135,7 @@ class TemplateRepository {
             WorkoutTemplatesCompanion.insert(
               name: n,
               position: Value((row.read(maxPos) ?? -1) + 1),
+              folderId: Value(folderId),
             ),
           );
     } else {
@@ -138,6 +157,9 @@ class TemplateRepository {
             targetSets: Value(it.targetSets.clamp(1, 10)),
             repsMin: Value(it.repsMin),
             repsMax: Value(it.repsMax),
+            restSeconds: Value(it.restSeconds),
+            targetWeightKg: Value(it.targetWeightKg),
+            supersetGroup: Value(it.supersetGroup),
           ),
         );
       }
@@ -157,6 +179,58 @@ class TemplateRepository {
       );
     }
   });
+
+  /// Moves a template into a folder, or out of any folder with null.
+  Future<void> moveToFolder(int templateId, int? folderId) =>
+      (_db.update(_db.workoutTemplates)..where((t) => t.id.equals(templateId)))
+          .write(WorkoutTemplatesCompanion(folderId: Value(folderId)));
+
+  // ---------------------------------------------------------------- folders
+
+  Stream<List<TemplateFolder>> watchFolders() =>
+      (_db.select(_f)..orderBy([
+            (f) => OrderingTerm.asc(f.position),
+            (f) => OrderingTerm.asc(f.id),
+          ]))
+          .watch();
+
+  /// Adds a folder after the existing ones. Returns its id.
+  Future<int> createFolder(String name) => _db.transaction(() async {
+    final maxPos = _f.position.max();
+    final row = await (_db.selectOnly(_f)..addColumns([maxPos])).getSingle();
+    return _db
+        .into(_f)
+        .insert(
+          TemplateFoldersCompanion.insert(
+            name: name.trim(),
+            position: Value((row.read(maxPos) ?? -1) + 1),
+          ),
+        );
+  });
+
+  Future<void> renameFolder(int id, String name) =>
+      (_db.update(_f)..where((f) => f.id.equals(id))).write(
+        TemplateFoldersCompanion(name: Value(name.trim())),
+      );
+
+  /// Deletes a folder. Its templates are kept and leave the folder.
+  Future<void> deleteFolder(int id) =>
+      (_db.delete(_f)..where((f) => f.id.equals(id))).go();
+
+  Future<void> reorderFolders(List<int> orderedIds) => _db.batch((b) {
+    for (var i = 0; i < orderedIds.length; i++) {
+      b.update(
+        _f,
+        TemplateFoldersCompanion(position: Value(i)),
+        where: (f) => f.id.equals(orderedIds[i]),
+      );
+    }
+  });
+
+  Future<void> setFolderCollapsed(int id, bool collapsed) =>
+      (_db.update(_f)..where((f) => f.id.equals(id))).write(
+        TemplateFoldersCompanion(isCollapsed: Value(collapsed)),
+      );
 
   /// Builds template items from a finished workout's structure.
   Future<List<TemplateItem>> itemsFromWorkout(int workoutId) async {
@@ -180,7 +254,7 @@ class TemplateRepository {
       if (min == null) {
         final reps = [
           for (final s in sets)
-            if (!s.isWarmup) ?s.reps,
+            if (!s.setType.isWarmup) ?s.reps,
         ]..sort();
         if (reps.isNotEmpty) {
           min = reps.first;
@@ -193,6 +267,9 @@ class TemplateRepository {
           targetSets: sets.isEmpty ? 3 : sets.length.clamp(1, 10),
           repsMin: min,
           repsMax: max,
+          restSeconds: w.restSeconds,
+          targetWeightKg: w.targetWeightKg,
+          supersetGroup: w.supersetGroup,
         ),
       );
     }

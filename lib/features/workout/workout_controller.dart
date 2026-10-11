@@ -18,6 +18,7 @@ class DraftExercise {
     required this.previous,
     this.repsMin,
     this.repsMax,
+    this.restSeconds,
   });
 
   /// WorkoutExercise id.
@@ -30,6 +31,9 @@ class DraftExercise {
   final int? repsMin;
   final int? repsMax;
 
+  /// Rest after a set. Null uses the default from settings.
+  final int? restSeconds;
+
   DraftExercise copyWith({List<WorkoutSet>? sets, Exercise? exercise}) =>
       DraftExercise(
         id: id,
@@ -38,6 +42,7 @@ class DraftExercise {
         previous: previous,
         repsMin: repsMin,
         repsMax: repsMax,
+        restSeconds: restSeconds,
       );
 
   TrackingType get type => exercise.trackingType;
@@ -169,6 +174,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       previous: previous,
       repsMin: e.row.targetRepsMin,
       repsMax: e.row.targetRepsMax,
+      restSeconds: e.row.restSeconds,
     );
   }
 
@@ -224,7 +230,9 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   void toggleWarmup(int exerciseId, int setId) {
     final s = _set(exerciseId, setId);
     if (s == null) return;
-    final u = s.copyWith(isWarmup: !s.isWarmup);
+    final u = s.copyWith(
+      setType: s.setType.isWarmup ? SetType.normal : SetType.warmup,
+    );
     _replaceSet(exerciseId, u);
     _dirty[u.id] = u;
     flush();
@@ -267,7 +275,9 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
 
     final settings = ref.read(settingsProvider);
     if (_draft.isLive && settings.autoStartRest) {
-      ref.read(restTimerProvider.notifier).start(settings.defaultRestSeconds);
+      ref
+          .read(restTimerProvider.notifier)
+          .start(ex.restSeconds ?? settings.defaultRestSeconds);
     }
     return CompleteResult.ok;
   }
