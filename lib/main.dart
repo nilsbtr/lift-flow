@@ -28,13 +28,15 @@ Future<void> main() async {
 
   final db = AppDatabase();
   final notifications = NotificationService();
-  final (settings, live, rest, _, _, pkg) = await (
+  final (settings, live, rest, _, _, pkg, _) = await (
     SettingsRepository(db).get(),
     WorkoutRepository(db).getLive(),
     RestRepository(db).get(),
     notifications.init(),
     AppIcons.precache(),
     PackageInfo.fromPlatform(),
+    // Drops a past workout abandoned by a killed app.
+    WorkoutRepository(db).purgeEmpty(),
   ).wait;
 
   runApp(

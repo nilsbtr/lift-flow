@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../domain/exercise_search.dart';
 import '../domain/records.dart';
 import 'database.dart';
+import 'template_repository.dart';
 
 class LiveWorkoutExistsException implements Exception {
   const LiveWorkoutExistsException(this.workoutId);
@@ -55,6 +56,17 @@ class WorkoutRepository {
             ..where((w) => w.endedAt.isNotNull())
             ..orderBy([(w) => OrderingTerm.desc(w.startedAt)]))
           .watch();
+
+  /// Ids of workouts that include [exerciseId].
+  Future<Set<int>> workoutIdsWithExercise(int exerciseId) async {
+    final rows =
+        await (_db.selectOnly(_we, distinct: true)
+              ..addColumns([_we.workoutId])
+              ..where(_we.exerciseId.equals(exerciseId)))
+            .map((r) => r.read(_we.workoutId)!)
+            .get();
+    return rows.toSet();
+  }
 
   Future<LoadedWorkout?> load(int id) async {
     final workout = await (_db.select(
@@ -239,43 +251,42 @@ class WorkoutRepository {
 
   // ---------------------------------------------------------------- commands
 
-  /// Starts a workout, optionally from a template. Throws if one is already live.
-  Future<int> start({int? templateId}) => _db.transaction(() async {
+  /// Starts a workout, optionally from a template or an explicit list of
+  /// [items] (e.g. repeating a past workout). Throws if one is already live.
+  Future<int> start({
+    int? templateId,
+    String? name,
+    List<TemplateItem>? items,
+  }) => _db.transaction(() async {
     final live = await getLive();
     if (live != null) throw LiveWorkoutExistsException(live.id);
 
-    String name = 'Workout';
-    List<TemplateExercise> items = const [];
-    if (templateId != null) {
-      final tpl = await (_db.select(
-        _db.workoutTemplates,
-      )..where((t) => t.id.equals(templateId))).getSingleOrNull();
+    var title = name ?? 'Workout';
+    var planned = items ?? const <TemplateItem>[];
+    if (items == null && templateId != null) {
+      final tpl = await TemplateRepository(_db).get(templateId);
       if (tpl != null) {
-        name = tpl.name;
-        items =
-            await (_db.select(_db.templateExercises)
-                  ..where((t) => t.templateId.equals(templateId))
-                  ..orderBy([(t) => OrderingTerm.asc(t.position)]))
-                .get();
+        title = tpl.template.name;
+        planned = tpl.items;
       }
     }
     final id = await _db
         .into(_w)
         .insert(
           WorkoutsCompanion.insert(
-            name: name,
+            name: title,
             startedAt: DateTime.now(),
             templateId: Value(templateId),
           ),
         );
-    for (var i = 0; i < items.length; i++) {
-      final it = items[i];
+    for (var i = 0; i < planned.length; i++) {
+      final it = planned[i];
       final weId = await _db
           .into(_we)
           .insert(
             WorkoutExercisesCompanion.insert(
               workoutId: id,
-              exerciseId: it.exerciseId,
+              exerciseId: it.exercise.id,
               position: i,
               targetRepsMin: Value(it.repsMin),
               targetRepsMax: Value(it.repsMax),
@@ -286,7 +297,7 @@ class WorkoutRepository {
           );
       // Warm-ups mirror the last session so prefilled values line up.
       final prev = await previousSets(
-        it.exerciseId,
+        it.exercise.id,
         excludeWorkoutId: id,
         before: DateTime.now(),
       );
@@ -409,6 +420,12 @@ class WorkoutRepository {
         WorkoutsCompanion(name: Value(name.trim())),
       );
 
+  /// Moves a workout in time. Callers check the pair with `workoutTimesError`.
+  Future<void> setTimes(int workoutId, DateTime start, DateTime end) =>
+      (_db.update(_w)..where((w) => w.id.equals(workoutId))).write(
+        WorkoutsCompanion(startedAt: Value(start), endedAt: Value(end)),
+      );
+
   Future<void> setNote(int workoutId, String? note) {
     final n = note?.trim();
     return (_db.update(_w)..where((w) => w.id.equals(workoutId))).write(
@@ -418,6 +435,46 @@ class WorkoutRepository {
 
   Future<void> discard(int workoutId) =>
       (_db.delete(_w)..where((w) => w.id.equals(workoutId))).go();
+
+  /// Creates an empty finished workout to fill in afterwards. It never counts
+  /// as live, so this works while a workout is running. It also clears out
+  /// earlier ones that were abandoned without a set.
+  Future<int> createPast(
+    DateTime start,
+    DateTime end, {
+    double? bodyweightKg,
+  }) => _db.transaction(() async {
+    await purgeEmpty();
+    return _db
+        .into(_w)
+        .insert(
+          WorkoutsCompanion.insert(
+            name: 'Workout',
+            startedAt: start,
+            endedAt: Value(end),
+            bodyweightKg: Value(bodyweightKg),
+          ),
+        );
+  });
+
+  /// Deletes finished workouts that were never saved and have no completed
+  /// set, which only exist when a past workout was abandoned. Returns how
+  /// many were removed.
+  Future<int> purgeEmpty() {
+    final logged =
+        _db.selectOnly(_we).join([
+            innerJoin(_s, _s.workoutExerciseId.equalsExp(_we.id)),
+          ])
+          ..addColumns([_we.workoutId])
+          ..where(_s.isCompleted);
+    return (_db.delete(_w)..where(
+          (w) =>
+              w.endedAt.isNotNull() &
+              w.exerciseCount.equals(0) &
+              w.id.isNotInQuery(logged),
+        ))
+        .go();
+  }
 
   /// Finalizes a workout: drops unchecked sets and empty exercises, snapshots
   /// body weight and writes the summary from working sets. Keeps an existing

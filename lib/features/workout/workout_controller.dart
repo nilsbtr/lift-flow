@@ -395,6 +395,16 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     await _repo.rename(workoutId, n);
   }
 
+  /// Moves a past workout in time. Callers check the pair first.
+  Future<void> setTimes(DateTime start, DateTime end) async {
+    state = AsyncData(
+      _draft.copyWith(
+        workout: _draft.workout.copyWith(startedAt: start, endedAt: Value(end)),
+      ),
+    );
+    await _repo.setTimes(workoutId, start, end);
+  }
+
   void setBodyweight(double? kg) {
     state = AsyncData(_draft.copyWith(bodyweightKg: () => kg));
   }
@@ -435,8 +445,10 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   Future<void> discard() async {
     _debounce?.cancel();
     _dirty.clear();
+    final live = state.value?.isLive ?? true;
     await _repo.discard(workoutId);
-    ref.read(restTimerProvider.notifier).skip();
+    // Dropping a past workout must not stop the live workout’s rest timer.
+    if (live) ref.read(restTimerProvider.notifier).skip();
     _release();
   }
 

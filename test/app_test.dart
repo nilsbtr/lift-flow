@@ -13,6 +13,7 @@ import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/template_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/domain/exercise_search.dart';
+import 'package:lift_flow/domain/history.dart';
 import 'package:lift_flow/domain/muscles.dart';
 import 'package:lift_flow/domain/records.dart';
 import 'package:lift_flow/domain/rest.dart';
@@ -524,6 +525,221 @@ void main() {
       expect(
         [for (final s in next.exercises.single.sets) s.setType.isWarmup],
         [true, false, false, false],
+      );
+    });
+
+    test('a past workout can be logged during a live one', () async {
+      final (repo, live, _) = await bench(sets: 1);
+      final start = DateTime(2026, 10, 3, 18);
+      final end = DateTime(2026, 10, 3, 19, 15);
+      final id = await repo.createPast(start, end, bodyweightKg: 80);
+      expect((await repo.getLive())!.id, live);
+
+      final ex = (await repo.load(live))!.exercises.single.exercise;
+      final (_, sets) = await repo.addExercise(id, ex.id, position: 0, sets: 2);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      expect(
+        await repo.finish(id, bodyweightKg: 80, keepEndedAt: true),
+        isTrue,
+      );
+
+      final w = (await repo.load(id))!.workout;
+      expect((w.startedAt, w.endedAt, w.totalSets), (start, end, 1));
+      expect((await repo.watchHistory().first).map((x) => x.id), [id]);
+    });
+
+    test('abandoned past workouts are purged, logged ones are kept', () async {
+      final (repo, live, liveSets) = await bench(sets: 1);
+      await repo.writeSets([done(liveSets[0], 50, 5)]);
+      final ex = (await repo.load(live))!.exercises.single.exercise;
+      final empty = await repo.createPast(
+        DateTime(2026, 10, 1, 9),
+        DateTime(2026, 10, 1, 10),
+      );
+      final kept = await repo.createPast(
+        DateTime(2026, 10, 2, 9),
+        DateTime(2026, 10, 2, 10),
+      );
+      final (_, sets) = await repo.addExercise(kept, ex.id, position: 0);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(kept, bodyweightKg: null, keepEndedAt: true);
+
+      // The next log clears the empty one, not the live or finished ones.
+      final next = await repo.createPast(
+        DateTime(2026, 10, 3, 9),
+        DateTime(2026, 10, 3, 10),
+      );
+      expect(await repo.load(empty), isNull);
+      expect(await repo.load(kept), isNotNull);
+      expect(await repo.load(live), isNotNull);
+      expect(await repo.purgeEmpty(), 1);
+      expect(await repo.load(next), isNull);
+
+      // A saved workout is never purged, even if edits unchecked every set.
+      await repo.writeSets([done(sets[0], 60, 10).copyWith(isCompleted: false)]);
+      expect(await repo.purgeEmpty(), 0);
+      expect(await repo.load(kept), isNotNull);
+    });
+
+    test('setTimes moves a workout and finishing keeps the end', () async {
+      final (repo, id, sets) = await bench(sets: 1);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(id, bodyweightKg: null);
+      final start = DateTime(2026, 9, 1, 7);
+      final end = DateTime(2026, 9, 1, 8, 30);
+      await repo.setTimes(id, start, end);
+      final w = (await repo.load(id))!.workout;
+      expect((w.startedAt, w.endedAt), (start, end));
+
+      await repo.finish(id, bodyweightKg: null, keepEndedAt: true);
+      expect((await repo.load(id))!.workout.endedAt, end);
+    });
+
+    test('do again copies exercises, sets and targets', () async {
+      final exercises = ExerciseRepository(db);
+      final a = await exercises.create(
+        name: 'Bench press',
+        muscleGroup: MuscleGroup.chest,
+        trackingType: TrackingType.weights,
+      );
+      final b = await exercises.create(
+        name: 'Row',
+        muscleGroup: MuscleGroup.back,
+        trackingType: TrackingType.weights,
+      );
+      final repo = WorkoutRepository(db);
+      final tid = await TemplateRepository(db).save(
+        name: 'Upper',
+        items: [
+          TemplateItem(exercise: a, targetSets: 3, restSeconds: 90),
+          TemplateItem(exercise: b, targetSets: 2, supersetGroup: 1),
+        ],
+      );
+      final first = await repo.start(templateId: tid);
+      await repo.writeSets([
+        for (final e in (await repo.load(first))!.exercises)
+          for (final s in e.sets) done(s, 60, 8),
+      ]);
+      await repo.finish(first, bodyweightKg: null);
+
+      final source = (await repo.load(first))!.workout;
+      final items = await TemplateRepository(db).itemsFromWorkout(first);
+      final id = await repo.start(
+        templateId: source.templateId,
+        name: source.name,
+        items: items,
+      );
+      final again = (await repo.load(id))!;
+      expect(again.workout.endedAt, isNull);
+      expect(again.workout.name, 'Upper');
+      expect(again.workout.templateId, tid);
+      expect(again.exercises.map((e) => e.exercise.name), [
+        'Bench press',
+        'Row',
+      ]);
+      expect(again.exercises.map((e) => e.sets.length), [3, 2]);
+      expect(again.exercises.first.row.restSeconds, 90);
+      expect(again.exercises.last.row.supersetGroup, 1);
+      expect(
+        again.exercises.every((e) => e.sets.every((s) => !s.isCompleted)),
+        isTrue,
+      );
+      // The live guard in the repository still applies.
+      expect(
+        () => repo.start(name: 'x', items: items),
+        throwsA(isA<LiveWorkoutExistsException>()),
+      );
+    });
+
+    Future<Workout> logged(
+      DateTime start, {
+      double kg = 0,
+      String name = 'Push',
+      int? templateId,
+    }) => db
+        .into(db.workouts)
+        .insertReturning(
+          WorkoutsCompanion.insert(
+            name: name,
+            startedAt: start,
+            endedAt: Value(start.add(const Duration(hours: 1))),
+            totalSets: const Value(3),
+            totalVolumeKg: Value(kg),
+            templateId: Value(templateId),
+          ),
+        );
+
+    test('history filters by name, template and exercise', () async {
+      final (repo, id, sets) = await bench(sets: 1);
+      await repo.writeSets([done(sets[0], 60, 10)]);
+      await repo.finish(id, bodyweightKg: null);
+      final exId = (await repo.load(id))!.exercises.single.exercise.id;
+      final tpl = await TemplateRepository(db).save(name: 'Legs', items: []);
+      final a = await logged(DateTime(2026, 10, 1), name: 'Legs', templateId: tpl);
+      final b = await logged(DateTime(2026, 10, 2), name: 'Push day');
+      final c = await logged(DateTime(2026, 10, 3), name: 'legs (home)');
+      final bench0 = (await repo.load(id))!.workout;
+      final all = [a, b, c, bench0];
+
+      expect(filterHistory(all), all);
+      expect(filterHistory(all, query: ' LEGS ').map((w) => w.id), [a.id, c.id]);
+      expect(filterHistory(all, templateId: tpl), [a]);
+      expect(filterHistory(all, query: 'push', templateId: tpl), isEmpty);
+      expect(filterHistory(all, query: 'nothing'), isEmpty);
+
+      final ids = await repo.workoutIdsWithExercise(exId);
+      expect(ids, {id});
+      expect(filterHistory(all, exerciseWorkoutIds: ids), [bench0]);
+      expect(filterHistory(all, exerciseWorkoutIds: {}), isEmpty);
+    });
+
+    test('week comparison matches the same part of last week', () async {
+      // Wednesday noon: last week’s Friday must not count against this week.
+      final now = DateTime(2026, 10, 14, 12);
+      final all = [
+        await logged(DateTime(2026, 10, 5, 10), kg: 1000),
+        await logged(DateTime(2026, 10, 9, 10), kg: 5000),
+        await logged(DateTime(2026, 10, 11, 10), kg: 500),
+        await logged(DateTime(2026, 10, 13, 10), kg: 1100),
+      ];
+      final monday = compareWeeks(all, now: now)!;
+      expect((monday.thisKg, monday.lastKg), (1100, 1000));
+      expect(monday.label, 'Volume +10% vs this time last week');
+      // With Sunday first, the 11th belongs to this week.
+      final sunday = compareWeeks(all, now: now, firstDay: DateTime.sunday)!;
+      expect((sunday.thisKg, sunday.lastKg), (1600, 1000));
+      expect(sunday.label, 'Volume +60% vs this time last week');
+
+      expect(compareWeeks(all.sublist(1), now: now), isNull);
+      expect(compareWeeks(all.sublist(0, 1), now: now), isNull);
+      final drop = [
+        await logged(DateTime(2026, 10, 6), kg: 1000),
+        await logged(DateTime(2026, 10, 13), kg: 500),
+      ];
+      expect(
+        compareWeeks(drop, now: now)!.label,
+        'Volume ${kMinus}50% vs this time last week',
+      );
+    });
+
+    test('a workout’s end must follow its start', () {
+      final start = DateTime(2026, 10, 13, 23, 30);
+      expect(endAtClock(start, 0, 30), DateTime(2026, 10, 14, 0, 30));
+      expect(endAtClock(start, 23, 45), DateTime(2026, 10, 13, 23, 45));
+      // Too far into the next day to be the same session.
+      final morning = DateTime(2026, 10, 13, 10);
+      expect(endAtClock(morning, 9, 0), DateTime(2026, 10, 13, 9));
+
+      final now = DateTime(2026, 10, 14, 12);
+      const after = 'End must be after start.';
+      const future = 'That’s in the future.';
+      expect(workoutTimesError(morning, DateTime(2026, 10, 13, 11), now), isNull);
+      expect(workoutTimesError(morning, morning, now), after);
+      expect(workoutTimesError(morning, DateTime(2026, 10, 13, 9), now), after);
+      expect(workoutTimesError(morning, DateTime(2026, 10, 14, 13), now), future);
+      expect(
+        workoutTimesError(DateTime(2026, 10, 15), DateTime(2026, 10, 15, 1), now),
+        future,
       );
     });
 
