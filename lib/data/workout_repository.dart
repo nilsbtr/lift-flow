@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../domain/exercise_search.dart';
 import '../domain/finish.dart';
 import '../domain/records.dart';
+import '../domain/supersets.dart';
 import '../domain/workout_name.dart';
 import 'database.dart';
 import 'template_repository.dart';
@@ -26,9 +27,12 @@ class LoadedWorkout {
 }
 
 class ExerciseSession {
-  const ExerciseSession(this.workout, this.sets);
+  const ExerciseSession(this.workout, this.sets, {this.note});
   final Workout workout;
   final List<WorkoutSet> sets;
+
+  /// The exercise's note in this workout.
+  final String? note;
 }
 
 class WorkoutRepository {
@@ -163,11 +167,17 @@ class WorkoutRepository {
           ]);
     return q.watch().map((rows) {
       final byWorkout = <int, (Workout, List<WorkoutSet>)>{};
+      final notes = <int, Set<String>>{};
       for (final r in rows) {
         final w = r.readTable(_w);
         byWorkout.putIfAbsent(w.id, () => (w, [])).$2.add(r.readTable(_s));
+        final note = r.readTable(_we).note;
+        if (note != null) (notes[w.id] ??= {}).add(note);
       }
-      return [for (final v in byWorkout.values) ExerciseSession(v.$1, v.$2)];
+      return [
+        for (final v in byWorkout.values)
+          ExerciseSession(v.$1, v.$2, note: notes[v.$1.id]?.join('\n')),
+      ];
     });
   }
 
@@ -366,6 +376,25 @@ class WorkoutRepository {
     _we,
   )..where((w) => w.id.equals(workoutExerciseId))).write(changes);
 
+  /// Clears the superset group of the exercises among [linked] (ids) that no
+  /// longer have a partner next to them.
+  Future<void> _tidySupersets(int workoutId, Set<int> linked) async {
+    if (linked.isEmpty) return;
+    final rows =
+        await (_db.select(_we)
+              ..where((w) => w.workoutId.equals(workoutId))
+              ..orderBy([(w) => OrderingTerm.asc(w.position)]))
+            .get();
+    final groups = dropLoneGroups([for (final r in rows) r.supersetGroup]);
+    for (final (i, r) in rows.indexed) {
+      if (r.supersetGroup == groups[i] || !linked.contains(r.id)) continue;
+      await updateExercise(
+        r.id,
+        const WorkoutExercisesCompanion(supersetGroup: Value(null)),
+      );
+    }
+  }
+
   Future<void> reorderExercises(List<int> workoutExerciseIds) => _db.batch((b) {
     for (var i = 0; i < workoutExerciseIds.length; i++) {
       b.update(
@@ -547,6 +576,14 @@ class WorkoutRepository {
       await discard(workoutId);
       return false;
     }
+    // A superset whose partner was dropped above is no superset any more.
+    final spans = supersetSpans([
+      for (final ex in loaded.exercises) ex.row.supersetGroup,
+    ]);
+    await _tidySupersets(workoutId, {
+      for (final (i, ex) in loaded.exercises.indexed)
+        if (spans[i] != null) ex.row.id,
+    });
 
     final now = DateTime.now();
     final keep =

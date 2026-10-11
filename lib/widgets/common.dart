@@ -211,6 +211,22 @@ class Tag extends StatelessWidget {
   }
 }
 
+/// Joins two exercise cards of a superset. Goes between them, without a gap.
+class SupersetLink extends StatelessWidget {
+  const SupersetLink({super.key});
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Container(
+      margin: const EdgeInsets.only(left: Space.xl),
+      width: 2,
+      height: Space.md,
+      color: Theme.of(context).colorScheme.primary,
+    ),
+  );
+}
+
 /// Flat surface card with outline and optional tap.
 class FlatCard extends StatelessWidget {
   const FlatCard({

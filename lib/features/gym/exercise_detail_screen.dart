@@ -286,6 +286,11 @@ class ExerciseDetailScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: Space.xs),
+                    if (s.note case final note?)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: Space.xs),
+                        child: Text(note, style: t.bodyMedium),
+                      ),
                     SetList(
                       exercise: exercise,
                       sets: s.sets,

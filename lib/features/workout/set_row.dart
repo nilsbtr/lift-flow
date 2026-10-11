@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
+import '../../domain/loading.dart';
 import '../../domain/records.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
@@ -215,6 +216,7 @@ class SetRow extends ConsumerStatefulWidget {
     required this.unit,
     this.effort = EffortMode.off,
     this.records = const {},
+    this.bar,
   });
 
   final int workoutId;
@@ -227,6 +229,9 @@ class SetRow extends ConsumerStatefulWidget {
 
   /// Records this set beats.
   final Set<PrKind> records;
+
+  /// The bar of a barbell exercise, to show the plates per side for a weight.
+  final BarSetup? bar;
 
   @override
   ConsumerState<SetRow> createState() => _SetRowState();
@@ -267,8 +272,18 @@ class _SetRowState extends ConsumerState<SetRow> {
   bool get _typing =>
       _loadFocus.hasFocus || _repsFocus.hasFocus || _effortFocus.hasFocus;
 
+  /// Plates per side for the entered or hinted weight of a barbell set.
+  String? _plates() {
+    final bar = widget.bar;
+    if (bar == null || widget.index >= widget.exercise.sets.length) return null;
+    final kg = _set.loadKg ?? widget.exercise.hintFor(widget.index).load;
+    return kg == null ? null : fmtPlates(bar.load(kg), widget.unit);
+  }
+
   void _onBlur() {
     if (!_typing) _editor.flush();
+    // The plates line comes and goes with the focus.
+    if (widget.bar != null && mounted) setState(() {});
     if (_effortFocus.hasFocus || widget.index >= widget.exercise.sets.length) {
       return;
     }
@@ -329,11 +344,10 @@ class _SetRowState extends ConsumerState<SetRow> {
     switch (result) {
       case CompleteResult.ok:
         HapticFeedback.lightImpact();
-        final ex = ref
-            .read(workoutEditorProvider(widget.workoutId))
-            .value
-            ?.byId(widget.exercise.id);
-        final next = typing && ex != null ? nextField(ex, widget.index) : null;
+        final draft = ref.read(workoutEditorProvider(widget.workoutId)).value;
+        final next = typing && draft != null
+            ? nextFocus(draft, widget.exercise.id, widget.index)
+            : null;
         final row = next == null ? null : _mounted[next.setId];
         if (row == null) {
           FocusScope.of(context).unfocus();
@@ -358,6 +372,7 @@ class _SetRowState extends ConsumerState<SetRow> {
         editor: _editor,
         exercise: widget.exercise,
         setId: _set.id,
+        plates: _plates(),
       ),
     );
   }
@@ -373,9 +388,9 @@ class _SetRowState extends ConsumerState<SetRow> {
     final hasEffort = widget.effort != EffortMode.off;
     final hint = ex.hintFor(widget.index);
     final label = setLabels(ex.sets.map((s) => s.setType))[widget.index];
-    final prev = widget.index < ex.previous.length
-        ? ex.previous[widget.index]
-        : null;
+    final prev = ex.previousFor(widget.index);
+    // While typing in a barbell set, its plates show under the row.
+    final plates = _typing && !done ? _plates() : null;
 
     final prevText = prev == null
         ? '–'
@@ -390,11 +405,14 @@ class _SetRowState extends ConsumerState<SetRow> {
     final fieldFill = done ? Colors.transparent : lift.raised;
     final numStyle = t.titleMedium?.copyWith(fontFeatures: Fonts.tabular);
 
-    InputDecoration deco(String? hintText) => InputDecoration(
-      hintText: hintText,
-      fillColor: fieldFill,
-      contentPadding: const EdgeInsets.symmetric(vertical: Space.md),
-    );
+    // A suggested increase is tinted, so it doesn't pass for last time's load.
+    InputDecoration deco(String? hintText, {bool increase = false}) =>
+        InputDecoration(
+          hintText: hintText,
+          hintStyle: increase ? TextStyle(color: scheme.primary) : null,
+          fillColor: fieldFill,
+          contentPadding: const EdgeInsets.symmetric(vertical: Space.md),
+        );
 
     return AnimatedContainer(
       duration: Motion.of(context, Motion.medium),
@@ -496,6 +514,7 @@ class _SetRowState extends ConsumerState<SetRow> {
                           textInputAction: TextInputAction.next,
                           decoration: deco(
                             hint.load == null ? null : _loadText(hint.load),
+                            increase: hint.increase,
                           ),
                           onChanged: (v) =>
                               _editor.setLoad(ex.id, s.id, _parseLoad(v)),
@@ -522,7 +541,10 @@ class _SetRowState extends ConsumerState<SetRow> {
                         onEditingComplete: hasEffort
                             ? _effortFocus.requestFocus
                             : _toggle,
-                        decoration: deco(hint.reps?.toString()),
+                        decoration: deco(
+                          hint.reps?.toString(),
+                          increase: hint.increase,
+                        ),
                         onChanged: (v) =>
                             _editor.setReps(ex.id, s.id, int.tryParse(v)),
                       ),
@@ -584,6 +606,17 @@ class _SetRowState extends ConsumerState<SetRow> {
                 );
               },
             ),
+            if (plates != null)
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: SetCols.set + SetCols.gap,
+                  bottom: Space.xs,
+                ),
+                child: Text(
+                  'Per side: $plates',
+                  style: t.bodySmall?.copyWith(color: lift.muted),
+                ),
+              ),
             if (widget.records.isNotEmpty || s.note != null)
               Padding(
                 padding: const EdgeInsets.only(

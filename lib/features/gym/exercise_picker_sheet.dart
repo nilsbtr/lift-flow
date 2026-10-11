@@ -19,9 +19,25 @@ Future<List<Exercise>?> showExercisePicker(
   (_) => ExercisePickerSheet(exclude: exclude),
 );
 
+/// Picks one exercise: a tap chooses it and closes the sheet.
+Future<Exercise?> pickExercise(
+  BuildContext context, {
+  Set<int> exclude = const {},
+}) async => (await showAppSheet<List<Exercise>>(
+  context,
+  (_) => ExercisePickerSheet(exclude: exclude, single: true),
+))?.firstOrNull;
+
 class ExercisePickerSheet extends ConsumerStatefulWidget {
-  const ExercisePickerSheet({super.key, this.exclude = const {}});
+  const ExercisePickerSheet({
+    super.key,
+    this.exclude = const {},
+    this.single = false,
+  });
   final Set<int> exclude;
+
+  /// A tap picks the exercise instead of ticking it.
+  final bool single;
 
   @override
   ConsumerState<ExercisePickerSheet> createState() =>
@@ -40,14 +56,17 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
     super.dispose();
   }
 
-  void _toggle(Exercise e) => setState(() {
-    final i = _selected.indexWhere((x) => x.id == e.id);
-    if (i >= 0) {
-      _selected.removeAt(i);
-    } else {
-      _selected.add(e);
-    }
-  });
+  void _toggle(Exercise e) {
+    if (widget.single) return Navigator.pop(context, [e]);
+    setState(() {
+      final i = _selected.indexWhere((x) => x.id == e.id);
+      if (i >= 0) {
+        _selected.removeAt(i);
+      } else {
+        _selected.add(e);
+      }
+    });
+  }
 
   Future<void> _create() async {
     final created = await showExerciseEditor(
@@ -55,6 +74,7 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
       initialName: _text.trim(),
     );
     if (created == null || !mounted) return;
+    if (widget.single) return Navigator.pop(context, [created]);
     setState(() {
       _selected.add(created);
       _query.clear();
@@ -163,20 +183,22 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
                   subtitle: Text(
                     '${e.muscleGroup.label} · ${exerciseSubtitle(e)}',
                   ),
-                  trailing: AnimatedSwitcher(
-                    duration: Motion.of(context, Motion.fast),
-                    child: selected
-                        ? AppIcon(
-                            AppIcons.checkSolid,
-                            key: const ValueKey(true),
-                            color: scheme.primary,
-                          )
-                        : AppIcon(
-                            AppIcons.box,
-                            key: const ValueKey(false),
-                            color: lift.muted,
-                          ),
-                  ),
+                  trailing: widget.single
+                      ? null
+                      : AnimatedSwitcher(
+                          duration: Motion.of(context, Motion.fast),
+                          child: selected
+                              ? AppIcon(
+                                  AppIcons.checkSolid,
+                                  key: const ValueKey(true),
+                                  color: scheme.primary,
+                                )
+                              : AppIcon(
+                                  AppIcons.box,
+                                  key: const ValueKey(false),
+                                  color: lift.muted,
+                                ),
+                        ),
                   onTap: () => _toggle(e),
                 );
                 if (header == null) return tile;
@@ -188,25 +210,26 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
               },
             ),
           ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(Space.lg),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _selected.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, List.of(_selected)),
-                  child: Text(
-                    _selected.isEmpty
-                        ? 'Select exercises'
-                        : 'Add ${_selected.length}',
+          if (!widget.single)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(Space.lg),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _selected.isEmpty
+                        ? null
+                        : () => Navigator.pop(context, List.of(_selected)),
+                    child: Text(
+                      _selected.isEmpty
+                          ? 'Select exercises'
+                          : 'Add ${_selected.length}',
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );

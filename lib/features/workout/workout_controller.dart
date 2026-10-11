@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/widgets.dart';
@@ -7,7 +8,9 @@ import 'package:flutter_riverpod/misc.dart' show KeepAliveLink;
 
 import '../../data/database.dart';
 import '../../data/workout_repository.dart';
+import '../../domain/loading.dart';
 import '../../domain/records.dart';
+import '../../domain/supersets.dart';
 import '../../domain/workout_name.dart';
 import '../../providers.dart';
 
@@ -22,6 +25,10 @@ class DraftExercise {
     this.repsMin,
     this.repsMax,
     this.restSeconds,
+    this.note,
+    this.supersetGroup,
+    this.targetWeightKg,
+    this.stepKg,
   });
 
   /// WorkoutExercise id.
@@ -40,17 +47,45 @@ class DraftExercise {
   /// Rest after a set. Null uses the default from settings.
   final int? restSeconds;
 
-  DraftExercise copyWith({List<WorkoutSet>? sets, Exercise? exercise}) =>
-      DraftExercise(
-        id: id,
-        exercise: exercise ?? this.exercise,
-        sets: sets ?? this.sets,
-        previous: previous,
-        bests: bests,
-        repsMin: repsMin,
-        repsMax: repsMax,
-        restSeconds: restSeconds,
-      );
+  /// Note for this exercise in this workout.
+  final String? note;
+
+  /// Neighbours sharing a value form a superset.
+  final int? supersetGroup;
+
+  /// Planned weight, the hint while there is no previous session.
+  final double? targetWeightKg;
+
+  /// Smallest step the load can go up by. Null turns off suggested increases
+  /// and warm-up sets.
+  final double? stepKg;
+
+  DraftExercise copyWith({
+    List<WorkoutSet>? sets,
+    Exercise? exercise,
+    List<WorkoutSet>? previous,
+    ExerciseBests? Function()? bests,
+    int? Function()? restSeconds,
+    String? Function()? note,
+    int? Function()? supersetGroup,
+    double? Function()? targetWeightKg,
+    double? Function()? stepKg,
+  }) => DraftExercise(
+    id: id,
+    exercise: exercise ?? this.exercise,
+    sets: sets ?? this.sets,
+    previous: previous ?? this.previous,
+    bests: bests != null ? bests() : this.bests,
+    repsMin: repsMin,
+    repsMax: repsMax,
+    restSeconds: restSeconds != null ? restSeconds() : this.restSeconds,
+    note: note != null ? note() : this.note,
+    supersetGroup: supersetGroup != null ? supersetGroup() : this.supersetGroup,
+    targetWeightKg: targetWeightKg != null
+        ? targetWeightKg()
+        : this.targetWeightKg,
+    stepKg: stepKg != null ? stepKg() : this.stepKg,
+  );
 
   TrackingType get type => exercise.trackingType;
   LoadMode get mode => exercise.loadMode;
@@ -68,27 +103,121 @@ class DraftExercise {
     };
   }
 
+  /// The set of the last session that the set at [index] repeats: warm-ups
+  /// line up with warm-ups and working sets with working sets, in order.
+  WorkoutSet? previousFor(int index) {
+    final warmup = sets[index].setType.isWarmup;
+    var n = sets.take(index).where((s) => s.setType.isWarmup == warmup).length;
+    for (final p in previous) {
+      if (p.setType.isWarmup == warmup && n-- == 0) return p;
+    }
+    return null;
+  }
+
+  /// The step to go up by: set when the exercise has a rep range and every
+  /// working set of the last session reached its top. Null otherwise.
+  double? get increaseKg {
+    final min = repsMin;
+    final max = repsMax;
+    final step = stepKg;
+    if (min == null || max == null || max <= min || step == null) return null;
+    switch (type) {
+      case TrackingType.weights:
+        final working = previous.where((s) => !s.setType.isWarmup);
+        final topped = working.every(
+          (s) => _fits(s.loadKg) && (s.reps ?? 0) >= max,
+        );
+        return working.isNotEmpty && topped ? step : null;
+      case TrackingType.bodyweight:
+        return null;
+    }
+  }
+
   /// Placeholder values for a set: previous session → set above → target.
-  ({double? load, int? reps}) hintFor(int index) {
-    final prev = index < previous.length ? previous[index] : null;
+  /// With [increaseKg], working sets get the last load plus that step and the
+  /// bottom of the rep range instead, flagged as `increase`.
+  ({double? load, int? reps, bool increase}) hintFor(int index) {
+    final prev = previousFor(index);
+    final warmup = sets[index].setType.isWarmup;
     double? load;
     int? reps;
+    var increase = false;
     if (prev != null) {
       if (_fits(prev.loadKg)) load = prev.loadKg;
       reps = prev.reps;
+      final step = warmup ? null : increaseKg;
+      if (step != null && load != null) {
+        load += step;
+        reps = repsMin;
+        increase = true;
+      }
     }
-    if (index > 0 && (load == null || reps == null)) {
-      final above = sets[index - 1];
-      final aboveHint = hintFor(index - 1);
+    // The nearest set above of the same kind: a working set doesn't copy a
+    // warm-up.
+    final up = sets
+        .take(index)
+        .toList()
+        .lastIndexWhere((s) => s.setType.isWarmup == warmup);
+    if (up >= 0 && (load == null || reps == null)) {
+      final above = sets[up];
+      final aboveHint = hintFor(up);
       if (hasLoad && load == null) {
         final l = above.loadKg ?? aboveHint.load;
-        if (_fits(l)) load = l;
+        if (_fits(l)) {
+          load = l;
+          increase = above.loadKg == null && aboveHint.increase;
+        }
       }
       reps ??= above.reps ?? aboveHint.reps;
     }
+    if (!warmup && load == null && _fits(targetWeightKg)) load = targetWeightKg;
     reps ??= repsMin;
-    return (load: hasLoad ? load : null, reps: reps);
+    return hasLoad
+        ? (load: load, reps: reps, increase: increase)
+        : (load: null, reps: reps, increase: false);
   }
+
+  /// Index of the first working set.
+  int? get firstWorking {
+    final i = sets.indexWhere((s) => !s.setType.isWarmup);
+    return i < 0 ? null : i;
+  }
+
+  /// Warm-up sets to put before the first working set, ramping up to its
+  /// weight (entered or hinted). [barKg] adds the empty bar for a barbell.
+  /// Empty when the exercise has warm-ups, has started its working sets, or
+  /// has no known working weight.
+  List<({double loadKg, int reps})> warmups({required double barKg}) {
+    final at = firstWorking;
+    final step = stepKg;
+    if (at == null ||
+        step == null ||
+        sets[at].isCompleted ||
+        sets.any((s) => s.setType.isWarmup)) {
+      return const [];
+    }
+    switch (type) {
+      case TrackingType.weights:
+        final work = sets[at].loadKg ?? hintFor(at).load;
+        if (work == null) return const [];
+        return warmupSets(
+          work,
+          step: step,
+          barKg: exercise.equipment == Equipment.barbell ? barKg : null,
+        );
+      case TrackingType.bodyweight:
+        return const [];
+    }
+  }
+
+  /// Which working set the set at [index] is, from 0. Null for a warm-up.
+  int? roundOf(int index) => sets[index].setType.isWarmup
+      ? null
+      : sets.take(index).where((s) => !s.setType.isWarmup).length;
+
+  /// The working set of [round], if there is one.
+  WorkoutSet? setOfRound(int round) =>
+      sets.where((s) => !s.setType.isWarmup).elementAtOrNull(round);
 
   /// Records by set id: completed working sets that beat [bests] and the sets
   /// above them. [bodyweightKg] is the body weight of this workout.
@@ -144,12 +273,61 @@ enum SetField { load, reps }
   if (index >= ex.sets.length || !ex.sets[index].isCompleted) return null;
   for (final s in ex.sets.skip(index + 1)) {
     if (s.isCompleted) continue;
-    return (
-      setId: s.id,
-      field: ex.hasLoad && s.loadKg == null ? SetField.load : SetField.reps,
-    );
+    return (setId: s.id, field: _openField(ex, s));
   }
   return null;
+}
+
+SetField _openField(DraftExercise ex, WorkoutSet s) =>
+    ex.hasLoad && s.loadKg == null ? SetField.load : SetField.reps;
+
+/// [nextField] across a superset: completing a working set moves on to the
+/// same round of the other exercises, the ones below first, and then to the
+/// next round from the top. Outside a superset, and for warm-ups, this is
+/// [nextField].
+({int setId, SetField field})? nextFocus(
+  WorkoutDraft draft,
+  int exerciseId,
+  int index,
+) {
+  final ex = draft.byId(exerciseId);
+  if (ex == null || index >= ex.sets.length) return null;
+  final members = draft.supersetOf(exerciseId);
+  final round = ex.roundOf(index);
+  if (members.length < 2 || round == null) return nextField(ex, index);
+  if (!ex.sets[index].isCompleted) return null;
+  final at = members.indexOf(ex);
+  final rounds = members.fold(
+    0,
+    (n, m) => math.max(n, m.sets.where((s) => !s.setType.isWarmup).length),
+  );
+  for (var r = round; r < rounds; r++) {
+    final order = r == round
+        ? [...members.skip(at + 1), ...members.take(at)]
+        : members;
+    for (final m in order) {
+      final s = m.setOfRound(r);
+      if (s != null && !s.isCompleted) {
+        return (setId: s.id, field: _openField(m, s));
+      }
+    }
+  }
+  return null;
+}
+
+/// Whether the round of the set at [index] still has an open set in another
+/// exercise of its superset. Rest starts once this is false.
+bool roundOpen(WorkoutDraft draft, int exerciseId, int index) {
+  final ex = draft.byId(exerciseId);
+  final round = ex == null || index >= ex.sets.length
+      ? null
+      : ex.roundOf(index);
+  if (round == null) return false;
+  return draft
+      .supersetOf(exerciseId)
+      .any(
+        (m) => m.id != exerciseId && m.setOfRound(round)?.isCompleted == false,
+      );
 }
 
 @immutable
@@ -236,6 +414,15 @@ class WorkoutDraft {
     return null;
   }
 
+  /// The exercises linked with [id] in order, itself included. Just itself
+  /// when it is not in a superset.
+  List<DraftExercise> supersetOf(int id) {
+    final i = exercises.indexWhere((e) => e.id == id);
+    if (i < 0) return const [];
+    final run = supersetRun([for (final e in exercises) e.supersetGroup], i);
+    return run == null ? [exercises[i]] : exercises.sublist(run.start, run.end);
+  }
+
   WorkoutDraft copyWith({
     Workout? workout,
     List<DraftExercise>? exercises,
@@ -288,6 +475,10 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       for (final e in loaded.exercises) _toDraft(e, w, bests[e.exercise.id]),
     ]);
     if (w.endedAt == null) _keepAlive = ref.keepAlive();
+    ref.listen(
+      settingsProvider.select((s) => (s.weightUnit, s.plates)),
+      (_, _) => _refreshSteps(),
+    );
     return WorkoutDraft(
       workout: w,
       exercises: exercises,
@@ -314,6 +505,32 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       repsMin: e.row.targetRepsMin,
       repsMax: e.row.targetRepsMax,
       restSeconds: e.row.restSeconds,
+      note: e.row.note,
+      supersetGroup: e.row.supersetGroup,
+      targetWeightKg: e.row.targetWeightKg,
+      stepKg: _stepFor(e.exercise),
+    );
+  }
+
+  double _stepFor(Exercise e) {
+    final s = ref.read(settingsProvider);
+    return loadStep(
+      e.equipment,
+      s.weightUnit,
+      parsePlates(s.plates, s.weightUnit),
+    );
+  }
+
+  void _refreshSteps() {
+    final d = state.value;
+    if (d == null) return;
+    state = AsyncData(
+      d.copyWith(
+        exercises: [
+          for (final e in d.exercises)
+            e.copyWith(stepKg: () => _stepFor(e.exercise)),
+        ],
+      ),
     );
   }
 
@@ -426,8 +643,11 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     _dirty[u.id] = u;
     flush();
 
+    // In a superset, rest waits for the last exercise of the round.
     final settings = ref.read(settingsProvider);
-    if (_draft.isLive && settings.autoStartRest) {
+    if (_draft.isLive &&
+        settings.autoStartRest &&
+        !roundOpen(_draft, exerciseId, index)) {
       ref
           .read(restTimerProvider.notifier)
           .start(ex.restSeconds ?? settings.defaultRestSeconds);
@@ -443,6 +663,33 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     final latest = _draft.byId(exerciseId);
     if (latest == null) return;
     _replaceExercise(latest.copyWith(sets: [...latest.sets, created]));
+  }
+
+  /// Puts the warm-up ramp of [DraftExercise.warmups] before the first working
+  /// set, filled in but not completed.
+  Future<void> addWarmups(int exerciseId) async {
+    final ex = _draft.byId(exerciseId);
+    final at = ex?.firstWorking;
+    if (ex == null || at == null) return;
+    final s = ref.read(settingsProvider);
+    final plan = ex.warmups(barKg: barWeightKg(s.barWeightKg, s.weightUnit));
+    final created = [
+      for (final (i, p) in plan.indexed)
+        await _repo.addSet(
+          exerciseId,
+          position: at + i,
+          loadKg: p.loadKg,
+          reps: p.reps,
+          setType: SetType.warmup,
+        ),
+    ];
+    if (created.isEmpty || !ref.mounted) return;
+    final latest = _draft.byId(exerciseId);
+    if (latest == null) return;
+    final sets = [...latest.sets]
+      ..insertAll(latest.firstWorking ?? latest.sets.length, created);
+    _replaceExercise(latest.copyWith(sets: _renumber(sets)));
+    flush();
   }
 
   /// Hides a set right away but keeps it for [undoDelete] until
@@ -530,11 +777,67 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
               sets: sets,
               previous: previous,
               bests: bests[e.id],
+              stepKg: _stepFor(e),
             ),
           ],
         ),
       );
     }
+  }
+
+  /// Swaps the exercise of a card and keeps its place, superset, note, rest
+  /// and sets. Hints, previous sets and bests come from [e]. Loads carry over
+  /// when both exercises track load the same way. Otherwise they are cleared,
+  /// and a completed set that now lacks a required weight is reopened.
+  /// Returns whether loads were cleared.
+  Future<bool> replaceExercise(int exerciseId, Exercise e) async {
+    await commitDelete();
+    final w = _draft.workout;
+    if (_draft.byId(exerciseId)?.exercise.id == e.id) return false;
+    final previous = await _repo.previousSets(
+      e.id,
+      excludeWorkoutId: w.id,
+      before: w.startedAt,
+    );
+    final bests = bestsBefore(await _repo.setFacts([e.id]), w.id, w.startedAt);
+    await _repo.updateExercise(
+      exerciseId,
+      WorkoutExercisesCompanion(
+        exerciseId: Value(e.id),
+        targetWeightKg: const Value(null),
+      ),
+    );
+    if (!ref.mounted) return false;
+    final old = _draft.byId(exerciseId);
+    if (old == null) return false;
+    final weights = e.trackingType == TrackingType.weights;
+    final same =
+        old.type == e.trackingType && (weights || old.mode == e.loadMode);
+    var changed = false;
+    WorkoutSet cleared(WorkoutSet s) {
+      final done = s.isCompleted && !weights;
+      final load = done && e.loadMode != LoadMode.none ? 0.0 : null;
+      if (s.loadKg == load && s.isCompleted == done) return s;
+      changed = changed || s.loadKg != load;
+      return _dirty[s.id] = s.copyWith(
+        loadKg: Value(load),
+        isCompleted: done,
+        completedAt: Value(done ? s.completedAt : null),
+      );
+    }
+
+    _replaceExercise(
+      old.copyWith(
+        exercise: e,
+        sets: same ? null : [for (final s in old.sets) cleared(s)],
+        previous: previous,
+        bests: () => bests[e.id],
+        targetWeightKg: () => null,
+        stepKg: () => _stepFor(e),
+      ),
+    );
+    flush();
+    return changed;
   }
 
   Future<void> removeExercise(int exerciseId) async {
@@ -552,14 +855,88 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       ),
     );
     await _repo.removeExercise(exerciseId);
+    // Its superset partner may be on its own now.
+    if (ref.mounted) await _arrange(_draft.exercises);
   }
 
-  Future<void> reorder(int oldIndex, int newIndex) async {
+  /// Supersets stay together, see [moveGrouped].
+  Future<void> reorder(int oldIndex, int newIndex) => _arrange(
+    moveGrouped(_draft.exercises, oldIndex, newIndex, (e) => e.supersetGroup),
+  );
+
+  /// Links an exercise with the one below it into a superset, or adds it to
+  /// the superset that one is in.
+  Future<void> linkWithNext(int exerciseId) {
+    final list = _draft.exercises;
+    final groups = linkGroups([
+      for (final e in list) e.supersetGroup,
+    ], list.indexWhere((e) => e.id == exerciseId));
+    return _arrange([
+      for (final (i, e) in list.indexed)
+        e.copyWith(supersetGroup: () => groups[i]),
+    ]);
+  }
+
+  /// Takes an exercise out of its superset. From the middle it moves below
+  /// the superset, so the others stay linked.
+  Future<void> unlink(int exerciseId) {
     final list = [..._draft.exercises];
-    final item = list.removeAt(oldIndex);
-    list.insert(newIndex.clamp(0, list.length), item);
-    state = AsyncData(_draft.copyWith(exercises: list));
-    await _repo.reorderExercises([for (final e in list) e.id]);
+    final i = list.indexWhere((e) => e.id == exerciseId);
+    if (i < 0) return Future.value();
+    final run = supersetRun([for (final e in list) e.supersetGroup], i);
+    final item = list.removeAt(i).copyWith(supersetGroup: () => null);
+    list.insert(run == null || i == run.start ? i : run.end - 1, item);
+    return _arrange(list);
+  }
+
+  /// Shows [list] and writes its order and superset groups, without the
+  /// groups that link nothing.
+  Future<void> _arrange(List<DraftExercise> list) async {
+    final before = {for (final e in _draft.exercises) e.id: e.supersetGroup};
+    final groups = dropLoneGroups([for (final e in list) e.supersetGroup]);
+    final next = [
+      for (final (i, e) in list.indexed)
+        e.supersetGroup == groups[i]
+            ? e
+            : e.copyWith(supersetGroup: () => groups[i]),
+    ];
+    state = AsyncData(_draft.copyWith(exercises: next));
+    for (final e in next) {
+      if (before[e.id] == e.supersetGroup) continue;
+      await _repo.updateExercise(
+        e.id,
+        WorkoutExercisesCompanion(supersetGroup: Value(e.supersetGroup)),
+      );
+    }
+    await _repo.reorderExercises([for (final e in next) e.id]);
+  }
+
+  void setExerciseNote(int exerciseId, String? note) {
+    final ex = _draft.byId(exerciseId);
+    final n = note?.trim();
+    final value = n == null || n.isEmpty ? null : n;
+    if (ex == null || ex.note == value) return;
+    _replaceExercise(ex.copyWith(note: () => value));
+    unawaited(
+      _repo.updateExercise(
+        exerciseId,
+        WorkoutExercisesCompanion(note: Value(value)),
+      ),
+    );
+  }
+
+  /// Rest after a set of this exercise in this workout. Null goes back to the
+  /// default from settings.
+  void setRest(int exerciseId, int? seconds) {
+    final ex = _draft.byId(exerciseId);
+    if (ex == null || ex.restSeconds == seconds) return;
+    _replaceExercise(ex.copyWith(restSeconds: () => seconds));
+    unawaited(
+      _repo.updateExercise(
+        exerciseId,
+        WorkoutExercisesCompanion(restSeconds: Value(seconds)),
+      ),
+    );
   }
 
   /// Keeps exercise settings (e.g. load mode) in sync after editing.
@@ -569,7 +946,9 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       d.copyWith(
         exercises: [
           for (final x in d.exercises)
-            x.exercise.id == e.id ? x.copyWith(exercise: e) : x,
+            x.exercise.id == e.id
+                ? x.copyWith(exercise: e, stepKg: () => _stepFor(e))
+                : x,
         ],
       ),
     );
@@ -582,6 +961,15 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
       _draft.copyWith(workout: _draft.workout.copyWith(name: n)),
     );
     await _repo.rename(workoutId, n);
+  }
+
+  Future<void> setWorkoutNote(String? note) async {
+    final n = note?.trim();
+    final value = n == null || n.isEmpty ? null : n;
+    state = AsyncData(
+      _draft.copyWith(workout: _draft.workout.copyWith(note: Value(value))),
+    );
+    await _repo.setNote(workoutId, value);
   }
 
   /// Moves a past workout in time. Callers check the pair first.

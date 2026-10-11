@@ -13,6 +13,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/bodyweight_dialog.dart';
 import '../../widgets/common.dart';
+import 'barbell_settings.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -321,6 +322,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onChanged: (v) =>
                   _ctrl.update(AppSettingsCompanion(keepScreenOn: Value(v))),
             ),
+            const SectionLabel('Barbell'),
+            const BarbellSettings(),
             const SectionLabel('Appearance'),
             _SegmentTile<ThemePref>(
               title: 'Theme',
