@@ -8,6 +8,7 @@ import 'package:lift_flow/data/backup_service.dart';
 import 'package:lift_flow/data/database.dart';
 import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/domain/backup_nudge.dart';
+import 'package:lift_flow/domain/csv_export.dart';
 
 void main() {
   group('backup nudge', () {
@@ -120,6 +121,191 @@ void main() {
       );
       await backup.deleteAll();
       expect((await settings.get()).lastBackupAt, isNull);
+    });
+  });
+
+  group('csv export', () {
+    late AppDatabase db;
+    setUp(() => db = AppDatabase(NativeDatabase.memory()));
+    tearDown(() => db.close());
+
+    Future<int> exercise(String name, MuscleGroup g, {Equipment? eq}) => db
+        .into(db.exercises)
+        .insert(
+          ExercisesCompanion.insert(
+            name: name,
+            muscleGroup: g,
+            trackingType: TrackingType.weights,
+            createdAt: DateTime(2026, 1, 1),
+            equipment: Value(eq ?? Equipment.none),
+          ),
+        );
+
+    Future<int> workout(
+      String name,
+      DateTime start, {
+      bool live = false,
+      String? note,
+    }) => db
+        .into(db.workouts)
+        .insert(
+          WorkoutsCompanion.insert(
+            name: name,
+            startedAt: start,
+            endedAt: Value(live ? null : start.add(const Duration(hours: 1))),
+            note: Value(note),
+          ),
+        );
+
+    Future<int> slot(int workoutId, int exerciseId, int pos, {String? note}) =>
+        db
+            .into(db.workoutExercises)
+            .insert(
+              WorkoutExercisesCompanion.insert(
+                workoutId: workoutId,
+                exerciseId: exerciseId,
+                position: pos,
+                note: Value(note),
+              ),
+            );
+
+    Future<void> set(
+      int slotId,
+      int pos, {
+      double? kg,
+      int? reps,
+      bool done = true,
+      SetType type = SetType.normal,
+      double? rpe,
+      String? note,
+    }) => db
+        .into(db.workoutSets)
+        .insert(
+          WorkoutSetsCompanion.insert(
+            workoutExerciseId: slotId,
+            position: pos,
+            loadKg: Value(kg),
+            reps: Value(reps),
+            isCompleted: Value(done),
+            setType: Value(type),
+            rpe: Value(rpe),
+            note: Value(note),
+          ),
+        );
+
+    Future<List<String>> lines(WeightUnit unit) async {
+      final text = utf8.decode(await BackupService(db).exportCsv(unit));
+      expect(text.endsWith('\r\n'), isTrue);
+      return text.substring(0, text.length - 2).split('\r\n');
+    }
+
+    test('header only for an empty database', () async {
+      expect(await lines(WeightUnit.kg), [kCsvHeader.join(',')]);
+    });
+
+    test('one row per completed set of finished workouts', () async {
+      final bench = await exercise(
+        'Bench press',
+        MuscleGroup.chest,
+        eq: Equipment.barbell,
+      );
+      final w = await workout('Push', DateTime(2026, 3, 5, 18, 5));
+      final s = await slot(w, bench, 0);
+      await set(s, 0, kg: 40, reps: 10, type: SetType.warmup);
+      await set(s, 1, kg: 100, reps: 5, rpe: 8.5, note: 'Felt heavy');
+      await set(s, 2, kg: 100, reps: 4, done: false);
+      // A workout still running is not exported.
+      final live = await workout('Live', DateTime(2026, 3, 6), live: true);
+      await set(await slot(live, bench, 0), 0, kg: 50, reps: 5);
+
+      final rows = await lines(WeightUnit.kg);
+      expect(rows, hasLength(3));
+      expect(
+        rows[1],
+        '2026-03-05,18:05,Push,Bench press,Chest,Barbell,1,Warm-up,40,40,kg,'
+        '10,,,,,,',
+      );
+      expect(
+        rows[2],
+        '2026-03-05,18:05,Push,Bench press,Chest,Barbell,2,Normal,100,100,kg,'
+        '5,8.5,,,Felt heavy,,',
+      );
+    });
+
+    test('weight in the user’s unit next to kg', () async {
+      final e = await exercise('Squat', MuscleGroup.quads);
+      final w = await workout('Legs', DateTime(2026, 3, 5, 9));
+      final s = await slot(w, e, 0);
+      await set(s, 0, kg: 100, reps: 5);
+      await set(s, 1, reps: 12);
+      final rows = await lines(WeightUnit.lb);
+      expect(rows[1], contains(',Normal,100,220.46,lb,5,'));
+      // No load, no weight; the unit still says what the column means.
+      expect(rows[2], contains(',Normal,,,lb,12,'));
+      expect(rows[1].split(',')[5], '', reason: 'no equipment');
+    });
+
+    test('quotes commas, quotes and line breaks', () async {
+      final e = await exercise('Curl, "EZ" bar', MuscleGroup.biceps);
+      final w = await workout(
+        'Arms\nday',
+        DateTime(2026, 3, 5, 9),
+        note: 'a,b',
+      );
+      final s = await slot(w, e, 0, note: 'say "hi"');
+      await set(s, 0, kg: 20, reps: 8, note: 'line 1\r\nline 2');
+      final text = utf8.decode(
+        await BackupService(db).exportCsv(WeightUnit.kg),
+      );
+      expect(
+        text,
+        contains(
+          '2026-03-05,09:00,"Arms\nday","Curl, ""EZ"" bar",Biceps,,1,Normal,'
+          '20,20,kg,8,,,,"line 1\r\nline 2","say ""hi""","a,b"\r\n',
+        ),
+      );
+    });
+
+    test('orders by workout date, exercise and set position', () async {
+      final a = await exercise('A', MuscleGroup.chest);
+      final b = await exercise('B', MuscleGroup.back);
+      final later = await workout('Later', DateTime(2026, 3, 9, 8));
+      final earlier = await workout('Earlier', DateTime(2026, 3, 2, 8));
+      // Inserted out of order on purpose.
+      final lb = await slot(later, b, 1);
+      final la = await slot(later, a, 0);
+      await set(lb, 1, kg: 2, reps: 2);
+      await set(lb, 0, kg: 1, reps: 1);
+      await set(la, 0, kg: 3, reps: 3);
+      await set(await slot(earlier, b, 0), 0, kg: 4, reps: 4);
+      final order = [
+        for (final r in (await lines(WeightUnit.kg)).skip(1))
+          '${r.split(',').sublist(2, 4).join('/')}:${r.split(',')[8]}',
+      ];
+      expect(order, ['Earlier/B:4', 'Later/A:3', 'Later/B:1', 'Later/B:2']);
+    });
+
+    test('is UTF-8 without a byte order mark', () async {
+      final e = await exercise('Überzüge', MuscleGroup.back);
+      final w = await workout('Rücken', DateTime(2026, 3, 5));
+      await set(await slot(w, e, 0), 0, kg: 20, reps: 10, note: 'gut – 💪');
+      final bytes = await BackupService(db).exportCsv(WeightUnit.kg);
+      expect(bytes.take(3), isNot([0xEF, 0xBB, 0xBF]));
+      expect(utf8.decode(bytes), contains('Rücken,Überzüge'));
+      expect(utf8.decode(bytes), contains('gut – 💪'));
+    });
+
+    test('does not count as a backup', () async {
+      await BackupService(db).exportCsv(WeightUnit.kg);
+      expect((await SettingsRepository(db).get()).lastBackupAt, isNull);
+    });
+
+    test('csvField only quotes what needs it', () {
+      expect(csvField(null), '');
+      expect(csvField('plain text'), 'plain text');
+      expect(csvField(' padded '), ' padded ');
+      expect(csvField('a"b'), '"a""b"');
+      expect(csvField('a,b'), '"a,b"');
     });
   });
 }

@@ -26,3 +26,22 @@ Future<void> exportBackup(BuildContext context, WidgetRef ref) async {
     if (context.mounted) toast(context, 'Export failed');
   }
 }
+
+/// Saves every completed set as a CSV file. It isn't a backup, so the backup
+/// date stays as it is.
+Future<void> exportSetsCsv(BuildContext context, WidgetRef ref) async {
+  try {
+    final unit = ref.read(settingsProvider).weightUnit;
+    final bytes = await ref.read(backupProvider).exportCsv(unit);
+    final stamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+    final uri = await FilePicker.saveFile(
+      dialogTitle: 'Save sets',
+      fileName: 'lift_flow_sets_$stamp.csv',
+      bytes: bytes,
+      mimeType: 'text/csv',
+    );
+    if (uri != null && context.mounted) toast(context, 'Sets saved');
+  } catch (e) {
+    if (context.mounted) toast(context, 'Export failed');
+  }
+}

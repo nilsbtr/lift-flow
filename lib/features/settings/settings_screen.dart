@@ -106,6 +106,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (mounted) setState(() => _busy = false);
   }
 
+  Future<void> _exportCsv() async {
+    setState(() => _busy = true);
+    await exportSetsCsv(context, ref);
+    if (mounted) setState(() => _busy = false);
+  }
+
   Future<void> _import() async {
     final ok = await confirm(
       context,
@@ -395,6 +401,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                           '${DateFormat('d MMM yyyy').format(s.lastBackupAt!)}',
               ),
               onTap: _export,
+            ),
+            ListTile(
+              leading: const AppIcon(AppIcons.exportFile),
+              title: const Text('Export sets as CSV'),
+              subtitle: const Text('One row per set, for spreadsheets'),
+              onTap: _exportCsv,
             ),
             ListTile(
               leading: const AppIcon(AppIcons.importFile),

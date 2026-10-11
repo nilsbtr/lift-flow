@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:drift/drift.dart';
 
+import '../domain/csv_export.dart';
 import '../domain/muscles.dart';
 import 'database.dart';
 
@@ -166,6 +167,29 @@ class BackupService {
 
   static Uint8List Function() _encoder(Map<String, Object?> data) =>
       () => Uint8List.fromList(utf8.encode(jsonEncode(data)));
+
+  /// One CSV row per completed set of finished workouts, with weight also in
+  /// [unit]. A spreadsheet export, not a backup: it can't be imported.
+  Future<Uint8List> exportCsv(WeightUnit unit) async {
+    final workouts = await (_db.select(
+      _db.workouts,
+    )..where((w) => w.endedAt.isNotNull())).get();
+    final exercises = await _db.select(_db.exercises).get();
+    final wExercises = await _db.select(_db.workoutExercises).get();
+    final sets = await (_db.select(
+      _db.workoutSets,
+    )..where((s) => s.isCompleted)).get();
+    final source = (
+      workouts: workouts,
+      exercises: exercises,
+      workoutExercises: wExercises,
+      sets: sets,
+    );
+    return Isolate.run(_csvEncoder(source, unit));
+  }
+
+  static Uint8List Function() _csvEncoder(CsvSource source, WeightUnit unit) =>
+      () => encodeSetsCsv(source, unit);
 
   static ParsedBackup Function() _parser(Uint8List bytes) =>
       () => parseBackup(bytes);
