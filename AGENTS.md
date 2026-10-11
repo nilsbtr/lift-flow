@@ -39,7 +39,7 @@ Lift Flow is a local-only Flutter gym tracker (Android first). See [README.md](R
 
 ## Theme and icons
 
-- Use tokens from `theme/tokens.dart` (`Space`, `Radii`, `Motion.of(context, …)`, `IconSizes`, `kMinTap`), not magic numbers. Semantic colors come from `LiftColors.of(context)`: `done` (green), `rest` (yellow), `record` (red), `raised`, `muted`. Everything else comes from `ColorScheme`.
+- Use tokens from `theme/tokens.dart` (`Space`, `Radii`, `Motion.of(context, …)`, `IconSizes`, `kMinTap`), not magic numbers. Semantic colors come from `LiftColors.of(context)`: `done` (green), `rest` (yellow), `record` (violet), `raised`, `muted`. Red is only for danger and errors: use `colorScheme.error`. Everything else comes from `ColorScheme`.
 - The text theme defines explicit sizes. Use `Theme.of(context).textTheme` styles and don't hard-code font sizes.
 - Icons: use `AppIcon(AppIcons.x)`, not `Icon`/`Icons`. To add an icon, put `name.svg` (14×14 viewBox, Streamline Flex from `api.iconify.design/streamline-flex.json`) in `assets/icons/`, then add `static const x = AppIconData('name')` to `AppIcons`. Icons are precached at startup automatically. Don't use icon-font packages (`flexicon` and `phosphor_flutter` are broken here).
 - Launcher icon padding is set by `adaptive_icon_foreground_inset` in `pubspec.yaml`. Don't rescale the PNG.
