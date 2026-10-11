@@ -132,6 +132,23 @@ class ExerciseBests {
     PrKind.mostReps => mostReps?.toDouble(),
   };
 
+  /// Kinds in which [f] beats these bests. A kind with no best can't be beaten.
+  Set<PrKind> beatenBy(SetFact f) {
+    final now = ExerciseBests()..add(f);
+    return {
+      for (final k in PrKind.values)
+        if ((now.valueOf(k), valueOf(k)) case (final a?, final b?)
+            when a > b + _eps)
+          k,
+    };
+  }
+
+  ExerciseBests copy() => ExerciseBests()
+    ..heaviest = heaviest
+    ..e1rm = e1rm
+    ..bestLoad = bestLoad
+    ..mostReps = mostReps;
+
   static double _max(double? a, double b) => a == null || b > a ? b : a;
 }
 
@@ -174,6 +191,37 @@ List<RepMax> repMaxes(Iterable<SetFact> facts, {int maxReps = 12}) {
     }
   }
   return [for (final r in best.keys.toList()..sort()) best[r]!];
+}
+
+/// Bests per exercise from the workouts before [workoutId], which started at
+/// [start]. Exercises without earlier sets are missing.
+Map<int, ExerciseBests> bestsBefore(
+  List<SetFact> facts,
+  int workoutId,
+  DateTime start,
+) {
+  final before = <int, ExerciseBests>{};
+  for (final f in facts) {
+    if (f.workoutId != workoutId &&
+        (f.startedAt.isBefore(start) ||
+            (f.startedAt == start && f.workoutId < workoutId))) {
+      before.putIfAbsent(f.exerciseId, ExerciseBests.new).add(f);
+    }
+  }
+  return before;
+}
+
+/// Records set while logging: the kinds each fact beats, measured against
+/// [before] and the facts above it. Null entries (warm-ups, open sets) never
+/// count.
+List<Set<PrKind>> liveRecords(ExerciseBests before, List<SetFact?> facts) {
+  final best = before.copy();
+  final result = <Set<PrKind>>[];
+  for (final f in facts) {
+    result.add(f == null ? const {} : best.beatenBy(f));
+    if (f != null) best.add(f);
+  }
+  return result;
 }
 
 /// Computes PRs set in [workoutId]. [facts] must contain all completed sets of

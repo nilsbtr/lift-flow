@@ -294,6 +294,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onChanged: (v) =>
                   _ctrl.update(AppSettingsCompanion(firstDayOfWeek: Value(v))),
             ),
+            _SegmentTile<EffortMode>(
+              title: 'Set effort',
+              values: EffortMode.values,
+              selected: s.effortMode,
+              label: (v) => v.label,
+              onChanged: (v) =>
+                  _ctrl.update(AppSettingsCompanion(effortMode: Value(v))),
+            ),
             SwitchListTile(
               title: const Text('Keep screen on'),
               subtitle: const Text('While a workout is running'),

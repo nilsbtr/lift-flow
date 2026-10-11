@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../data/enums.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../router.dart';
@@ -15,6 +16,7 @@ import '../gym/exercise_picker_sheet.dart';
 import '../history/workout_times_field.dart';
 import 'finish_summary_sheet.dart';
 import 'rest_bar.dart';
+import 'set_menu_sheet.dart';
 import 'set_row.dart';
 import 'workout_controller.dart';
 
@@ -263,9 +265,21 @@ class _Title extends ConsumerWidget {
     final w = ref.watch(
       workoutEditorProvider(workoutId).select((a) => a.value?.workout),
     );
+    final (done, total) = ref.watch(
+      workoutEditorProvider(
+        workoutId,
+      ).select((a) => (a.value?.completedSets ?? 0, a.value?.totalSets ?? 0)),
+    );
     if (w == null) return const SizedBox.shrink();
     final t = Theme.of(context).textTheme;
     final muted = LiftColors.of(context).muted;
+    final progress = total == 0 ? null : '$done / $total sets';
+    Text sub(String state) => Text(
+      [?progress, state].join(' · '),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: t.bodySmall?.copyWith(color: muted),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -274,13 +288,11 @@ class _Title extends ConsumerWidget {
           PeriodicBuilder(
             period: const Duration(minutes: 1),
             anchor: w.startedAt,
-            builder: (_) => Text(
-              fmtDuration(DateTime.now().difference(w.startedAt)),
-              style: t.bodySmall?.copyWith(color: muted),
-            ),
+            builder: (_) =>
+                sub(fmtDuration(DateTime.now().difference(w.startedAt))),
           )
         else
-          Text('Editing', style: t.bodySmall?.copyWith(color: muted)),
+          sub('Editing'),
       ],
     );
   }
@@ -353,7 +365,7 @@ class _BodyweightFieldState extends ConsumerState<_BodyweightField> {
   }
 }
 
-class _ExerciseCard extends ConsumerWidget {
+class _ExerciseCard extends ConsumerStatefulWidget {
   const _ExerciseCard({
     required this.workoutId,
     required this.exerciseId,
@@ -365,11 +377,37 @@ class _ExerciseCard extends ConsumerWidget {
   final int index;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ExerciseCard> createState() => _ExerciseCardState();
+}
+
+class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
+  bool? _allDone;
+  bool _collapsed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final workoutId = widget.workoutId;
     final provider = workoutEditorProvider(workoutId);
-    final ex = ref.watch(provider.select((a) => a.value?.byId(exerciseId)));
+    final ex = ref.watch(
+      provider.select((a) => a.value?.byId(widget.exerciseId)),
+    );
+    final live = ref.watch(provider.select((a) => a.value?.isLive ?? true));
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final effort = ref.watch(settingsProvider.select((s) => s.effortMode));
+    final bodyweight = live
+        ? ref.watch(settingsProvider.select((s) => s.bodyweightKg))
+        : ref.watch(provider.select((a) => a.value?.bodyweightKg));
     if (ex == null) return const SizedBox.shrink();
+
+    // Collapses when the last set is completed and opens again as soon as a
+    // set is open. A past workout starts expanded, since it is there to edit.
+    final allDone = ex.sets.isNotEmpty && ex.sets.every((s) => s.isCompleted);
+    if (allDone != _allDone) {
+      _collapsed = allDone && (live || _allDone != null);
+      _allDone = allDone;
+    }
+    final collapsed = _collapsed;
+    final records = ex.records(bodyweight);
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
     final scheme = Theme.of(context).colorScheme;
@@ -465,7 +503,7 @@ class _ExerciseCard extends ConsumerWidget {
                   ],
                 ),
                 ReorderableDragStartListener(
-                  index: index,
+                  index: widget.index,
                   child: Padding(
                     padding: const EdgeInsets.all(Space.md),
                     child: AppIcon(AppIcons.drag, color: lift.muted),
@@ -474,40 +512,157 @@ class _ExerciseCard extends ConsumerWidget {
               ],
             ),
           ),
-          const SizedBox(height: Space.xs),
-          SetHeader(exercise: ex, unit: unit),
-          const SizedBox(height: Space.xs),
-          for (var i = 0; i < ex.sets.length; i++)
-            Dismissible(
-              key: ValueKey(ex.sets[i].id),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                color: scheme.error.withValues(alpha: 0.9),
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: Space.xl),
-                child: AppIcon(AppIcons.trash, color: scheme.onError),
-              ),
-              onDismissed: (_) => editor.removeSet(ex.id, ex.sets[i].id),
-              child: SetRow(
-                key: ValueKey('row-${ex.sets[i].id}'),
-                workoutId: workoutId,
-                exercise: ex,
-                index: i,
-                unit: unit,
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(Space.xs, 0, 0, Space.xs),
-              child: TextButton.icon(
-                onPressed: () => editor.addSet(ex.id),
-                icon: const AppIcon(AppIcons.plus, size: IconSizes.sm),
-                label: const Text('Add set'),
-              ),
-            ),
+          AnimatedSize(
+            duration: Motion.of(context, Motion.medium),
+            curve: Motion.curve,
+            alignment: Alignment.topCenter,
+            child: collapsed
+                ? _DoneSummary(
+                    exercise: ex,
+                    unit: unit,
+                    record: records.isNotEmpty,
+                    onTap: () => setState(() => _collapsed = false),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: Space.xs),
+                      if (widget.index == 0) const SetMenuHint(),
+                      SetHeader(exercise: ex, unit: unit, effort: effort),
+                      const SizedBox(height: Space.xs),
+                      for (var i = 0; i < ex.sets.length; i++)
+                        Dismissible(
+                          key: ValueKey(ex.sets[i].id),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            color: scheme.error.withValues(alpha: 0.9),
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: Space.xl),
+                            child: AppIcon(
+                              AppIcons.trash,
+                              color: scheme.onError,
+                            ),
+                          ),
+                          onDismissed: (_) => removeSetWithUndo(
+                            context,
+                            editor,
+                            ex.id,
+                            ex.sets[i].id,
+                          ),
+                          child: SetRow(
+                            key: ValueKey('row-${ex.sets[i].id}'),
+                            workoutId: workoutId,
+                            exercise: ex,
+                            index: i,
+                            unit: unit,
+                            effort: effort,
+                            records: records[ex.sets[i].id] ?? const {},
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          Space.xs,
+                          0,
+                          Space.xs,
+                          Space.xs,
+                        ),
+                        child: Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => editor.addSet(ex.id),
+                              icon: const AppIcon(
+                                AppIcons.plus,
+                                size: IconSizes.sm,
+                              ),
+                              label: const Text('Add set'),
+                            ),
+                            const Spacer(),
+                            if (allDone)
+                              TextButton(
+                                onPressed: () =>
+                                    setState(() => _collapsed = true),
+                                child: const Text('Hide sets'),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// What a collapsed exercise card shows instead of its sets.
+class _DoneSummary extends StatelessWidget {
+  const _DoneSummary({
+    required this.exercise,
+    required this.unit,
+    required this.record,
+    required this.onTap,
+  });
+
+  final DraftExercise exercise;
+  final WeightUnit unit;
+  final bool record;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final lift = LiftColors.of(context);
+    final n = exercise.sets.length;
+    final sets = [
+      for (final s in exercise.sets)
+        fmtSet(
+          type: exercise.type,
+          mode: exercise.mode,
+          loadKg: s.loadKg,
+          reps: s.reps,
+          unit: unit,
+        ),
+    ].join(', ');
+    return Semantics(
+      button: true,
+      hint: 'Show sets',
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Space.lg,
+            Space.sm,
+            Space.lg,
+            Space.md,
+          ),
+          child: Row(
+            children: [
+              AppIcon(
+                AppIcons.checkSolid,
+                size: IconSizes.sm,
+                color: lift.done,
+              ),
+              const SizedBox(width: Space.sm),
+              Expanded(
+                child: Text(
+                  '$n ${n == 1 ? 'set' : 'sets'} done · $sets',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: lift.muted),
+                ),
+              ),
+              if (record) ...[
+                const SizedBox(width: Space.sm),
+                AppIcon(
+                  AppIcons.trophySolid,
+                  size: IconSizes.sm,
+                  color: lift.record,
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
