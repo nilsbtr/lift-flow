@@ -38,7 +38,7 @@ abstract final class Motion {
       MediaQuery.disableAnimationsOf(context) ? Duration.zero : d;
 }
 
-/// Raw palette. Blue = act, green = done, yellow = rest, red = record/destructive.
+/// Raw palette. Blue = act, green = done, yellow = rest, violet = record, red = danger.
 abstract final class Palette {
   // Dark
   static const darkBackground = Color(0xFF121416);
@@ -50,6 +50,7 @@ abstract final class Palette {
   static const darkBlue = Color(0xFF6F9DD6);
   static const darkGreen = Color(0xFF7BBE9C);
   static const darkYellow = Color(0xFFE5BC6A);
+  static const darkViolet = Color(0xFFB39DF5);
   static const darkRed = Color(0xFFE27B70);
 
   // Pure black variant
@@ -67,6 +68,7 @@ abstract final class Palette {
   static const lightBlue = Color(0xFF2E6CB8);
   static const lightGreen = Color(0xFF2A7F57);
   static const lightYellow = Color(0xFF946B10);
+  static const lightViolet = Color(0xFF6D3FC9);
   static const lightRed = Color(0xFFC6503F);
 }
 

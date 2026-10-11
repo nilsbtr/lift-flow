@@ -144,37 +144,41 @@ class AppShell extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const _LiveBar(),
-          NavigationBar(
-            selectedIndex: shell.currentIndex,
-            onDestinationSelected: (i) =>
-                shell.goBranch(i, initialLocation: i == shell.currentIndex),
-            destinations: const [
-              NavigationDestination(
-                icon: AppIcon(AppIcons.home),
-                selectedIcon: AppIcon(AppIcons.homeSolid),
-                label: 'Home',
-              ),
-              NavigationDestination(
-                icon: AppIcon(AppIcons.history),
-                selectedIcon: AppIcon(AppIcons.historySolid),
-                label: 'History',
-              ),
-              NavigationDestination(
-                icon: AppIcon(AppIcons.progress),
-                selectedIcon: AppIcon(AppIcons.progressSolid),
-                label: 'Progress',
-              ),
-              NavigationDestination(
-                icon: AppIcon(AppIcons.dumbbell),
-                selectedIcon: AppIcon(AppIcons.dumbbellSolid),
-                label: 'Gym',
-              ),
-              NavigationDestination(
-                icon: AppIcon(AppIcons.settings),
-                selectedIcon: AppIcon(AppIcons.settingsSolid),
-                label: 'Settings',
-              ),
-            ],
+          // Labels are fixed-height; cap their scaling so they stay on one line.
+          MediaQuery.withClampedTextScaling(
+            maxScaleFactor: 1.15,
+            child: NavigationBar(
+              selectedIndex: shell.currentIndex,
+              onDestinationSelected: (i) =>
+                  shell.goBranch(i, initialLocation: i == shell.currentIndex),
+              destinations: const [
+                NavigationDestination(
+                  icon: AppIcon(AppIcons.home),
+                  selectedIcon: AppIcon(AppIcons.homeSolid),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: AppIcon(AppIcons.history),
+                  selectedIcon: AppIcon(AppIcons.historySolid),
+                  label: 'History',
+                ),
+                NavigationDestination(
+                  icon: AppIcon(AppIcons.progress),
+                  selectedIcon: AppIcon(AppIcons.progressSolid),
+                  label: 'Progress',
+                ),
+                NavigationDestination(
+                  icon: AppIcon(AppIcons.dumbbell),
+                  selectedIcon: AppIcon(AppIcons.dumbbellSolid),
+                  label: 'Gym',
+                ),
+                NavigationDestination(
+                  icon: AppIcon(AppIcons.settings),
+                  selectedIcon: AppIcon(AppIcons.settingsSolid),
+                  label: 'Settings',
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -64,6 +64,7 @@ abstract final class AppTheme {
     blue: Palette.lightBlue,
     green: Palette.lightGreen,
     yellow: Palette.lightYellow,
+    violet: Palette.lightViolet,
     red: Palette.lightRed,
   );
 
@@ -78,6 +79,7 @@ abstract final class AppTheme {
     blue: Palette.darkBlue,
     green: Palette.darkGreen,
     yellow: Palette.darkYellow,
+    violet: Palette.darkViolet,
     red: Palette.darkRed,
   );
 
@@ -92,6 +94,7 @@ abstract final class AppTheme {
     required Color blue,
     required Color green,
     required Color yellow,
+    required Color violet,
     required Color red,
   }) {
     final isDark = brightness == Brightness.dark;
@@ -215,7 +218,7 @@ abstract final class AppTheme {
         LiftColors(
           done: green,
           rest: yellow,
-          record: red,
+          record: violet,
           raised: raised,
           muted: muted,
         ),
@@ -238,7 +241,7 @@ abstract final class AppTheme {
         indicatorColor: scheme.primaryContainer,
         indicatorShape: const StadiumBorder(),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith(
           (s) => IconThemeData(
             size: IconSizes.md,

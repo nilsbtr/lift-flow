@@ -134,6 +134,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(settingsProvider);
+    final pkg = ref.watch(initialPackageInfoProvider);
     final t = Theme.of(context).textTheme;
     final muted = LiftColors.of(context).muted;
     final darkActive =
@@ -343,6 +344,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onTap: _deleteAll,
             ),
             const SectionLabel('About'),
+            ListTile(
+              title: const Text('Version'),
+              trailing: Text(
+                '${pkg.version} (${pkg.buildNumber})',
+                style: t.bodyLarge?.copyWith(color: muted),
+              ),
+            ),
             ListTile(
               title: const Text('Licenses'),
               onTap: () => showLicensePage(

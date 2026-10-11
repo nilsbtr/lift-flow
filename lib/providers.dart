@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'data/backup_service.dart';
 import 'data/bodyweight_repository.dart';
@@ -32,6 +33,16 @@ final initialSettingsProvider = Provider<UserSettings>(
 final initialLiveWorkoutProvider = Provider<Workout?>((ref) => null);
 
 final initialRestProvider = Provider<RestStateRow?>((ref) => null);
+
+/// Overridden in main.dart; the fallback keeps tests that skip the override working.
+final initialPackageInfoProvider = Provider<PackageInfo>(
+  (ref) => PackageInfo(
+    appName: 'Lift Flow',
+    packageName: '',
+    version: '0.0.0',
+    buildNumber: '0',
+  ),
+);
 
 final exerciseRepoProvider = Provider(
   (ref) => ExerciseRepository(ref.watch(databaseProvider)),

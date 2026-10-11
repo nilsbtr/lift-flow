@@ -78,7 +78,7 @@ class HomeScreen extends ConsumerWidget {
                     const SizedBox(width: Space.md),
                     const Expanded(
                       child: Text(
-                        'Create a template, like "Push" or "Legs", to start '
+                        'Create a template, like “Push” or “Legs”, to start '
                         'it here with one tap.',
                       ),
                     ),
@@ -338,7 +338,7 @@ class _TemplatePreviewSheet extends StatelessWidget {
                             child: Text(it.exercise.name, style: t.bodyLarge),
                           ),
                           Text(
-                            '${it.targetSets} × '
+                            '${it.targetSets} $kTimes '
                             '${it.repsMin == null ? '–' : fmtRepsRange(it.repsMin, it.repsMax)}',
                             style: t.bodyMedium?.copyWith(color: lift.muted),
                           ),
