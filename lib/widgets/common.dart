@@ -63,11 +63,30 @@ void toast(BuildContext context, String message) {
     ..showSnackBar(SnackBar(content: Text(message)));
 }
 
-/// "W" for warm-ups; working sets of any other type are numbered from 1.
+/// Typed sets show their letter, normal sets their number. Every set but a
+/// warm-up counts, so a failure set after two normal ones is "F" and the set
+/// after it is "4".
 List<String> setLabels(Iterable<SetType> types) {
   var n = 0;
-  return [for (final t in types) t.isWarmup ? t.letter : '${++n}'];
+  final labels = <String>[];
+  for (final t in types) {
+    if (!t.isWarmup) n++;
+    labels.add(t.letter.isEmpty ? '$n' : t.letter);
+  }
+  return labels;
 }
+
+/// Accent of a typed set: yellow for warm-ups, blue for the working types.
+/// Null for normal sets.
+Color? setTypeColor(BuildContext context, SetType type) => switch (type) {
+  SetType.normal => null,
+  SetType.warmup => LiftColors.of(context).rest,
+  _ => Theme.of(context).colorScheme.primary,
+};
+
+/// Spoken name of a set, e.g. "Set 2" or "Warm-up".
+String setSemantics(SetType type, String label) =>
+    type == SetType.normal ? 'Set $label' : type.label;
 
 class SectionLabel extends StatelessWidget {
   const SectionLabel(this.text, {super.key, this.trailing});
@@ -178,7 +197,14 @@ class Tag extends StatelessWidget {
             AppIcon(icon!, size: IconSizes.xs, color: color),
             const SizedBox(width: Space.xs),
           ],
-          Text(label, style: t.labelSmall?.copyWith(color: color)),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.labelSmall?.copyWith(color: color),
+            ),
+          ),
         ],
       ),
     );

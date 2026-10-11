@@ -125,16 +125,17 @@ void main() {
     expect(withLegs, isNot(contains(MuscleGroup.arms)));
   });
 
-  test('setLabels numbers every set but warm-ups', () {
+  test('setLabels shows letters and counts every set but warm-ups', () {
     expect(
       setLabels([
         SetType.warmup,
         SetType.normal,
         SetType.drop,
         SetType.failure,
+        SetType.normal,
         SetType.amrap,
       ]),
-      ['W', '1', '2', '3', '4'],
+      ['W', '1', 'D', 'F', '4', 'A'],
     );
     expect([for (final t in SetType.values) t.letter], ['', 'W', 'D', 'F', 'A']);
   });
@@ -507,12 +508,12 @@ void main() {
       expect(w.exercises.single.sets, hasLength(1));
     });
 
-    test('starting a template mirrors the last session’s warm-ups', () async {
+    test('starting a template mirrors set types but failure', () async {
       final (repo, id, sets) = await bench();
       await repo.writeSets([
         done(sets[0], 40, 10, warmup: true),
-        done(sets[1], 80, 8),
-        done(sets[2], 80, 6),
+        done(sets[1], 80, 8).copyWith(setType: SetType.failure),
+        done(sets[2], 60, 12).copyWith(setType: SetType.drop),
       ]);
       await repo.finish(id, bodyweightKg: null);
       final ex = (await repo.load(id))!.exercises.single.exercise;
@@ -523,8 +524,8 @@ void main() {
 
       final next = (await repo.load(await repo.start(templateId: tid)))!;
       expect(
-        [for (final s in next.exercises.single.sets) s.setType.isWarmup],
-        [true, false, false, false],
+        [for (final s in next.exercises.single.sets) s.setType],
+        [SetType.warmup, SetType.normal, SetType.drop, SetType.normal],
       );
     });
 

@@ -295,7 +295,8 @@ class WorkoutRepository {
               supersetGroup: Value(it.supersetGroup),
             ),
           );
-      // Warm-ups mirror the last session so prefilled values line up.
+      // Set types mirror the last session so prefilled values line up.
+      // Failure is an outcome, not a plan, so it isn't carried over.
       final prev = await previousSets(
         it.exercise.id,
         excludeWorkoutId: id,
@@ -309,8 +310,8 @@ class WorkoutRepository {
               workoutExerciseId: weId,
               position: p,
               setType: Value(
-                p < prev.length && prev[p].setType.isWarmup
-                    ? SetType.warmup
+                p < prev.length && prev[p].setType != SetType.failure
+                    ? prev[p].setType
                     : SetType.normal,
               ),
             ),

@@ -14,6 +14,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/charts/chart_card.dart';
 import '../../widgets/common.dart';
+import '../../widgets/set_list.dart';
 import 'exercise_editor_sheet.dart';
 import 'exercise_picker_sheet.dart';
 import 'exercise_trend_card.dart';
@@ -68,6 +69,7 @@ class ExerciseDetailScreen extends ConsumerWidget {
     final sessions =
         ref.watch(exerciseSessionsProvider(exerciseId)).value ?? const [];
     final unit = ref.watch(settingsProvider.select((s) => s.weightUnit));
+    final effort = ref.watch(settingsProvider.select((s) => s.effortMode));
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
 
@@ -284,20 +286,12 @@ class ExerciseDetailScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: Space.xs),
-                    Text(
-                      s.sets
-                          .map(
-                            (set) =>
-                                '${set.setType.isWarmup ? 'W ' : ''}${fmtSet(
-                                  type: exercise.trackingType,
-                                  mode: exercise.loadMode,
-                                  loadKg: set.loadKg,
-                                  reps: set.reps,
-                                  unit: unit,
-                                )}',
-                          )
-                          .join('   '),
-                      style: t.bodyMedium?.copyWith(color: lift.muted),
+                    SetList(
+                      exercise: exercise,
+                      sets: s.sets,
+                      unit: unit,
+                      effort: effort,
+                      compact: true,
                     ),
                   ],
                 ),
