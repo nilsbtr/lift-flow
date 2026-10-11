@@ -13,6 +13,7 @@ import 'data/settings_repository.dart';
 import 'data/template_repository.dart';
 import 'data/workout_repository.dart';
 import 'domain/records.dart';
+import 'domain/rest.dart';
 import 'domain/stats.dart';
 import 'services/notifications.dart';
 
@@ -233,11 +234,27 @@ class RestTimerController extends Notifier<RestTimerState?> {
   @override
   RestTimerState? build() {
     ref.onDispose(() => _end?.cancel());
-    final row = ref.read(initialRestProvider);
-    if (row == null || !row.endsAt.isAfter(DateTime.now())) return null;
-    final s = RestTimerState(row.endsAt, row.totalSeconds);
-    _arm(s);
+    final s = _fromRow(ref.read(initialRestProvider));
+    if (s != null) _arm(s);
     return s;
+  }
+
+  static RestTimerState? _fromRow(RestStateRow? row) =>
+      row == null || !row.endsAt.isAfter(DateTime.now())
+      ? null
+      : RestTimerState(row.endsAt, row.totalSeconds);
+
+  /// Re-reads the persisted rest, which a notification action may have changed.
+  Future<void> reload() async {
+    final s = _fromRow(await ref.read(restRepoProvider).get());
+    if (!ref.mounted) return;
+    final cur = state;
+    if (s?.endsAt == cur?.endsAt && s?.totalSeconds == cur?.totalSeconds) {
+      return;
+    }
+    _end?.cancel();
+    state = s;
+    if (s != null) _arm(s);
   }
 
   void start(int seconds) {
@@ -250,16 +267,17 @@ class RestTimerController extends Notifier<RestTimerState?> {
   void adjust(int deltaSeconds) {
     final s = state;
     if (s == null) return;
-    final endsAt = s.endsAt.add(Duration(seconds: deltaSeconds));
-    if (!endsAt.isAfter(DateTime.now())) {
+    final next = adjustRest(
+      s.endsAt,
+      s.totalSeconds,
+      deltaSeconds,
+      DateTime.now(),
+    );
+    if (next == null) {
       skip();
       return;
     }
-    final total = (s.totalSeconds + deltaSeconds).clamp(
-      s.remainingSeconds(),
-      3600,
-    );
-    _set(RestTimerState(endsAt, total));
+    _set(RestTimerState(next.endsAt, next.totalSeconds));
   }
 
   void skip() {

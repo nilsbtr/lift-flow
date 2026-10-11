@@ -20,28 +20,32 @@ class LiftFlowApp extends ConsumerStatefulWidget {
 class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
   late final AppLifecycleListener _lifecycle;
   StreamSubscription<String?>? _taps;
+  StreamSubscription<void>? _restChanges;
   bool? _wakelock;
 
   @override
   void initState() {
     super.initState();
     final notifications = ref.read(notificationsProvider);
-    _lifecycle = AppLifecycleListener(
-      onHide: _onHide,
-      onShow: () => unawaited(notifications.clear()),
-    );
+    _lifecycle = AppLifecycleListener(onHide: _onHide, onShow: _onShow);
     _taps = notifications.taps.listen((payload) {
       if (payload == NotificationService.payloadWorkout &&
           ref.read(liveWorkoutProvider) != null) {
         ref.read(routerProvider).go('/workout');
       }
     });
+    _restChanges = notifications.restChanges.listen(
+      (_) => unawaited(ref.read(restTimerProvider.notifier).reload()),
+    );
+    // Notifications of a killed process outlive it.
+    unawaited(notifications.clear());
   }
 
   void _onHide() {
     final live = ref.read(liveWorkoutProvider);
     if (live == null) return;
     final notifications = ref.read(notificationsProvider);
+    unawaited(notifications.showWorkout(live.name, live.startedAt));
     final rest = ref.read(restTimerProvider);
     if (rest != null && rest.endsAt.isAfter(DateTime.now())) {
       unawaited(
@@ -50,15 +54,20 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
           alert: ref.read(settingsProvider).restAlerts,
         ),
       );
-    } else {
-      unawaited(notifications.showWorkout(live.name, live.startedAt));
     }
+  }
+
+  /// A notification action may have changed the rest while the app was hidden.
+  void _onShow() {
+    unawaited(ref.read(notificationsProvider).clear());
+    unawaited(ref.read(restTimerProvider.notifier).reload());
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
     unawaited(_taps?.cancel());
+    unawaited(_restChanges?.cancel());
     super.dispose();
   }
 
