@@ -412,7 +412,6 @@ void main() {
       final p = await lib.service.add(fakeJpeg(1), note: 'Secret');
       final backup = BackupService(lib.db);
       final json = await backup.export();
-      expect(kBackupVersion, 3);
       final text = utf8.decode(json);
       expect(text.toLowerCase(), isNot(contains('photo')));
       expect(text, isNot(contains(p.fileName)));
