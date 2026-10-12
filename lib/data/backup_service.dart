@@ -418,10 +418,10 @@ ParsedBackup parseBackup(Uint8List bytes) {
     plates: Value(v3 ? _platesOrNull(s, 'plates') : null),
     balanceMin: Value(balanceMin),
     balanceMax: Value(balanceMax),
-    // Device-local state starts fresh, like the permission prompt.
+    // Device-local state starts fresh, like the permission prompt. The app
+    // lock is absent so an import keeps this device's choice.
     lastBackupAt: const Value(null),
     backupSnoozedAt: const Value(null),
-    appLock: const Value(false),
     setMenuHintSeen: const Value(false),
     dynamicColor: Value(v3 && _bool(s, 'dynamicColor')),
     reminderDays: Value(v3 ? _int(s, 'reminderDays', min: 0, max: 127) : 0),

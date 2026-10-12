@@ -16,8 +16,11 @@ import 'data/workout_repository.dart';
 import 'domain/exercise_search.dart';
 import 'domain/records.dart';
 import 'domain/rest.dart';
+import 'domain/shortcuts.dart';
 import 'domain/stats.dart';
+import 'services/app_lock.dart';
 import 'services/notifications.dart';
+import 'services/shortcuts.dart';
 
 // ------------------------------------------------------------ infrastructure
 
@@ -27,6 +30,15 @@ final databaseProvider = Provider<AppDatabase>(
 
 final notificationsProvider = Provider<NotificationService>(
   (ref) => NotificationService(),
+);
+
+final shortcutsProvider = Provider<ShortcutService>(
+  (ref) => ShortcutService(),
+);
+
+/// Overridden in tests; the app asks the device itself.
+final authenticatorProvider = Provider<Authenticator>(
+  (ref) => DeviceAuthenticator(),
 );
 
 final initialSettingsProvider = Provider<UserSettings>(
@@ -118,6 +130,123 @@ class SettingsController extends Notifier<UserSettings> {
 
 final settingsProvider = NotifierProvider<SettingsController, UserSettings>(
   SettingsController.new,
+);
+
+// ------------------------------------------------------------ app lock
+
+/// How long the app may stay in the background before it asks again. Rests
+/// run a few minutes and people check their phone meanwhile, so a shorter
+/// grace would prompt on nearly every return during a workout.
+const kLockGrace = Duration(minutes: 5);
+
+class AppLockState {
+  const AppLockState({this.locked = false, this.busy = false, this.failure});
+
+  /// App content is hidden until the user authenticates.
+  final bool locked;
+
+  /// The system prompt is showing.
+  final bool busy;
+
+  /// Why the last unlock attempt didn't work.
+  final AuthResult? failure;
+}
+
+/// Locks on a cold start and after [kLockGrace] in the background. While
+/// locked, `AppLockGate` hides everything and blocks navigation.
+class AppLockController extends Notifier<AppLockState> {
+  DateTime? _hiddenAt;
+  VoidCallback? _pending;
+
+  @override
+  AppLockState build() =>
+      AppLockState(locked: ref.read(settingsProvider).appLock);
+
+  bool get _enabled => ref.read(settingsProvider).appLock;
+
+  /// The app left the screen: the grace period starts.
+  void onHidden([DateTime? now]) {
+    if (state.busy) return; // The prompt itself can background the app.
+    if (state.locked) {
+      _pending = null; // Abandoned, so don't run it at a much later unlock.
+    } else if (_enabled) {
+      _hiddenAt ??= now ?? DateTime.now();
+    }
+  }
+
+  /// The app is back: locks it if it was away longer than [kLockGrace].
+  void onShown([DateTime? now]) {
+    _relockIfAway(now);
+    _hiddenAt = null;
+  }
+
+  void _relockIfAway(DateTime? now) {
+    final at = _hiddenAt;
+    if (at == null || state.locked || !_enabled) return;
+    final away = (now ?? DateTime.now()).difference(at);
+    // A clock set back counts as away.
+    if (away.isNegative || away >= kLockGrace) {
+      _hiddenAt = null;
+      state = const AppLockState(locked: true);
+    }
+  }
+
+  /// Runs [action] now, or after the next unlock (only the latest waits).
+  /// Intents like notification taps arrive before the resume event, so the
+  /// grace period is checked here too.
+  void whenUnlocked(VoidCallback action, [DateTime? now]) {
+    _relockIfAway(now);
+    if (state.locked) {
+      _pending = action;
+    } else {
+      action();
+    }
+  }
+
+  /// Shows the system prompt. A failed or cancelled prompt leaves it locked.
+  Future<void> unlock() async {
+    if (!state.locked || state.busy) return;
+    state = const AppLockState(locked: true, busy: true);
+    final result = await ref
+        .read(authenticatorProvider)
+        .authenticate('Unlock Lift Flow');
+    if (!ref.mounted) return;
+    if (result != AuthResult.success) {
+      state = AppLockState(locked: true, failure: result);
+      return;
+    }
+    state = const AppLockState();
+    _hiddenAt = null;
+    final run = _pending;
+    _pending = null;
+    run?.call();
+  }
+
+  /// Turns the lock on or off once the user has authenticated. A device
+  /// without a screen lock can't authenticate, but may still turn it off.
+  Future<AuthResult> setEnabled(bool enabled) async {
+    if (state.busy) return AuthResult.failed;
+    state = const AppLockState(busy: true);
+    final result = await ref
+        .read(authenticatorProvider)
+        .authenticate(enabled ? 'Turn on app lock' : 'Turn off app lock');
+    final done =
+        result == AuthResult.success ||
+        (!enabled && result == AuthResult.unavailable);
+    if (done && ref.mounted) {
+      await ref
+          .read(settingsProvider.notifier)
+          .update(AppSettingsCompanion(appLock: Value(enabled)));
+    }
+    if (!ref.mounted) return result;
+    state = const AppLockState();
+    _hiddenAt = null;
+    return done ? AuthResult.success : result;
+  }
+}
+
+final appLockProvider = NotifierProvider<AppLockController, AppLockState>(
+  AppLockController.new,
 );
 
 // ------------------------------------------------------------ data streams
@@ -228,6 +357,17 @@ final liveWorkoutProvider = Provider<Workout?>((ref) {
 
 /// Live workouts already asked about being forgotten in this app session.
 final forgottenAskedProvider = Provider<Set<int>>((ref) => {});
+
+/// Templates offered as launcher shortcuts, most recently used first.
+final shortcutTemplatesProvider = Provider<List<WorkoutTemplate>>((ref) {
+  final templates = ref.watch(templatesProvider).value ?? const [];
+  final history = ref.watch(historyProvider).value ?? const <Workout>[];
+  final live = ref.watch(liveWorkoutProvider);
+  return shortcutTemplates(
+    [for (final d in templates) d.template],
+    [?live, ...history],
+  );
+});
 
 // ------------------------------------------------------------ rest timer
 

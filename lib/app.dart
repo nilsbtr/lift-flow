@@ -5,8 +5,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'data/database.dart';
+import 'features/lock/lock_gate.dart';
+import 'features/workout/workout_actions.dart';
 import 'providers.dart';
 import 'router.dart';
+import 'services/app_lock.dart';
 import 'services/notifications.dart';
 import 'theme/app_theme.dart';
 
@@ -31,7 +34,9 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     _taps = notifications.taps.listen((payload) {
       if (payload == NotificationService.payloadWorkout &&
           ref.read(liveWorkoutProvider) != null) {
-        ref.read(routerProvider).go('/workout');
+        ref
+            .read(appLockProvider.notifier)
+            .whenUnlocked(() => ref.read(routerProvider).go('/workout'));
       }
     });
     _restChanges = notifications.restChanges.listen(
@@ -39,9 +44,43 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
     );
     // Notifications of a killed process outlive it.
     unawaited(notifications.clear());
+
+    unawaited(ref.read(shortcutsProvider).init(_onShortcut));
+    ref.listenManual(
+      shortcutTemplatesProvider,
+      (_, templates) => unawaited(ref.read(shortcutsProvider).sync(templates)),
+      fireImmediately: true,
+    );
+    ref.listenManual(
+      settingsProvider.select((s) => s.appLock),
+      (_, on) => unawaited(setRecentsHidden(on)),
+      fireImmediately: true,
+    );
+  }
+
+  void _onShortcut(int templateId) => ref
+      .read(appLockProvider.notifier)
+      .whenUnlocked(() => unawaited(_startTemplate(templateId)));
+
+  /// Starts a template from a launcher shortcut, or opens Home if it's gone.
+  Future<void> _startTemplate(int templateId) async {
+    final template = await ref.read(templateRepoProvider).get(templateId);
+    if (!mounted) return;
+    if (template == null) {
+      ref.read(routerProvider).go('/');
+      return;
+    }
+    // A cold start can get here before the first frame has built the navigator.
+    if (rootNavigatorKey.currentContext == null) {
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    final navigator = rootNavigatorKey.currentContext;
+    if (!mounted || navigator == null || !navigator.mounted) return;
+    await startWorkout(navigator, ref, templateId: templateId);
   }
 
   void _onHide() {
+    ref.read(appLockProvider.notifier).onHidden();
     final live = ref.read(liveWorkoutProvider);
     if (live == null) return;
     final notifications = ref.read(notificationsProvider);
@@ -59,6 +98,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
 
   /// A notification action may have changed the rest while the app was hidden.
   void _onShow() {
+    ref.read(appLockProvider.notifier).onShown();
     unawaited(ref.read(notificationsProvider).clear());
     unawaited(ref.read(restTimerProvider.notifier).reload());
   }
@@ -95,6 +135,7 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
         ThemePref.dark => ThemeMode.dark,
       },
       routerConfig: router,
+      builder: (_, child) => AppLockGate(child: child!),
     );
   }
 }
