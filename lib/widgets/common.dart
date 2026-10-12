@@ -140,8 +140,9 @@ class EmptyState extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
     final muted = LiftColors.of(context).muted;
+    // Scrolls where it doesn't fit, as on a phone in landscape.
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(Space.xxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
