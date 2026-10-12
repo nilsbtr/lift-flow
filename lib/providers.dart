@@ -21,6 +21,7 @@ import 'domain/stats.dart';
 import 'services/app_lock.dart';
 import 'services/notifications.dart';
 import 'services/shortcuts.dart';
+import 'theme/dynamic_colors.dart';
 
 // ------------------------------------------------------------ infrastructure
 
@@ -48,6 +49,9 @@ final initialSettingsProvider = Provider<UserSettings>(
 final initialLiveWorkoutProvider = Provider<Workout?>((ref) => null);
 
 final initialRestProvider = Provider<RestStateRow?>((ref) => null);
+
+/// System colors, preloaded in main.dart. Null where the system has none.
+final dynamicSchemesProvider = Provider<DynamicSchemes?>((ref) => null);
 
 /// Overridden in main.dart; the fallback keeps tests that skip the override working.
 final initialPackageInfoProvider = Provider<PackageInfo>(
@@ -123,6 +127,30 @@ class SettingsController extends Notifier<UserSettings> {
     await repo.delete(date);
     await setBodyweight((await repo.latest())?.kg);
   }
+
+  /// Schedules the reminders the settings ask for. Call after anything that
+  /// may have changed them: startup, resume, a change here, an import.
+  Future<void> syncReminders() => ref
+      .read(notificationsProvider)
+      .syncReminders(state.reminderDays, state.reminderMinutes);
+
+  Future<void> setReminders({int? days, int? minutes}) async {
+    await update(
+      AppSettingsCompanion(
+        reminderDays: days == null ? const Value.absent() : Value(days),
+        reminderMinutes: minutes == null
+            ? const Value.absent()
+            : Value(minutes),
+      ),
+    );
+    await syncReminders();
+  }
+
+  Future<void> markBackedUp() =>
+      update(AppSettingsCompanion(lastBackupAt: Value(DateTime.now())));
+
+  Future<void> snoozeBackupNudge() =>
+      update(AppSettingsCompanion(backupSnoozedAt: Value(DateTime.now())));
 
   Future<void> setWeeklyGoal(int? goal) =>
       update(AppSettingsCompanion(weeklyGoal: Value(goal?.clamp(1, 7))));

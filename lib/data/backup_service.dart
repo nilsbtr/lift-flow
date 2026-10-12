@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:drift/drift.dart';
 
+import '../domain/csv_export.dart';
 import '../domain/muscles.dart';
 import 'database.dart';
 
@@ -12,6 +13,15 @@ const int kMaxBackupBytes = 20 * 1024 * 1024;
 class BackupFormatException implements Exception {
   const BackupFormatException(this.message);
   final String message;
+  @override
+  String toString() => message;
+}
+
+/// An import or delete-all was refused because a workout is running.
+class BackupBlockedException implements Exception {
+  const BackupBlockedException();
+  static const message =
+      'A workout is running. Finish or discard it, then try again.';
   @override
   String toString() => message;
 }
@@ -167,6 +177,29 @@ class BackupService {
   static Uint8List Function() _encoder(Map<String, Object?> data) =>
       () => Uint8List.fromList(utf8.encode(jsonEncode(data)));
 
+  /// One CSV row per completed set of finished workouts, with weight also in
+  /// [unit]. A spreadsheet export, not a backup: it can't be imported.
+  Future<Uint8List> exportCsv(WeightUnit unit) async {
+    final workouts = await (_db.select(
+      _db.workouts,
+    )..where((w) => w.endedAt.isNotNull())).get();
+    final exercises = await _db.select(_db.exercises).get();
+    final wExercises = await _db.select(_db.workoutExercises).get();
+    final sets = await (_db.select(
+      _db.workoutSets,
+    )..where((s) => s.isCompleted)).get();
+    final source = (
+      workouts: workouts,
+      exercises: exercises,
+      workoutExercises: wExercises,
+      sets: sets,
+    );
+    return Isolate.run(_csvEncoder(source, unit));
+  }
+
+  static Uint8List Function() _csvEncoder(CsvSource source, WeightUnit unit) =>
+      () => encodeSetsCsv(source, unit);
+
   static ParsedBackup Function() _parser(Uint8List bytes) =>
       () => parseBackup(bytes);
 
@@ -177,6 +210,7 @@ class BackupService {
     }
     final parsed = await Isolate.run(_parser(bytes));
     await _db.transaction(() async {
+      await _ensureNoLiveWorkout();
       await _clear();
       await _db.update(_db.appSettings).write(parsed.settings);
       await _db.batch((b) {
@@ -199,12 +233,21 @@ class BackupService {
   }
 
   Future<void> deleteAll() => _db.transaction(() async {
+    await _ensureNoLiveWorkout();
     await _clear();
     await _db.delete(_db.appSettings).go();
     await _db
         .into(_db.appSettings)
         .insert(const AppSettingsCompanion(id: Value(1)));
   });
+
+  /// A running workout has an editor in memory that these would orphan.
+  Future<void> _ensureNoLiveWorkout() async {
+    final live = await (_db.select(
+      _db.workouts,
+    )..where((w) => w.endedAt.isNull())).get();
+    if (live.isNotEmpty) throw const BackupBlockedException();
+  }
 
   Future<void> _clear() async {
     await _db.delete(_db.restState).go();
@@ -318,6 +361,14 @@ DateTime _date(Map<String, Object?> m, String k) {
 DateTime? _dateOrNull(Map<String, Object?> m, String k) =>
     m[k] == null ? null : _date(m, k);
 
+/// When the file was made, never in the future. Falls back to now.
+DateTime _exportedAt(Map<String, Object?> m) {
+  final raw = m['exportedAt'];
+  final at = raw is String ? DateTime.tryParse(raw)?.toLocal() : null;
+  final now = DateTime.now();
+  return at == null || at.isAfter(now) ? now : at;
+}
+
 final _dayPattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
 DateTime _localDay(Map<String, Object?> m, String k) {
@@ -419,8 +470,9 @@ ParsedBackup parseBackup(Uint8List bytes) {
     balanceMin: Value(balanceMin),
     balanceMax: Value(balanceMax),
     // Device-local state starts fresh, like the permission prompt. The app
-    // lock is absent so an import keeps this device's choice.
-    lastBackupAt: const Value(null),
+    // lock is absent so an import keeps this device's choice. The data now
+    // equals the file, so it counts as backed up from when that was made.
+    lastBackupAt: Value(_exportedAt(m)),
     backupSnoozedAt: const Value(null),
     setMenuHintSeen: const Value(false),
     dynamicColor: Value(v3 && _bool(s, 'dynamicColor')),

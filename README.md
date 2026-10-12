@@ -12,18 +12,20 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 - **App shortcuts**: long-press the app icon to start one of your four most recently used templates.
 - **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps).
 - **Progress**: consistency calendar, weekly training (3M to All), muscle balance with a configurable weekly-sets band, top lifts, recent records, lifetime totals with a year in review, and body weight with a 7-day average. Weigh-ins can be backdated, edited, and undone after a delete.
-- **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, rest defaults, set effort (RPE or RIR), bar weight and available plates, keep screen on, and JSON backup export/import.
+- **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, Material You colors (Android 12+), rest defaults, set effort (RPE or RIR), bar weight and available plates, keep screen on, and JSON backup export/import with the date of the last backup.
+- **Reminders**: optional weekly notifications on the training days and time you pick, scheduled on the phone.
+- **CSV export**: every completed set as one row, for spreadsheets.
 
 ## Tech stack
 
-| Concern     | Package                                                                                      |
-| ----------- | -------------------------------------------------------------------------------------------- |
-| UI          | `material_ui` (Material 3), custom theme and tokens                                          |
-| State       | `flutter_riverpod` 3                                                                         |
-| Routing     | `go_router` (`StatefulShellRoute` with 4 tabs)                                               |
-| Persistence | `drift` + `drift_flutter` (SQLite, WAL)                                                      |
-| Icons       | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                |
-| Platform    | `flutter_local_notifications`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions` |
+| Concern     | Package                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| UI          | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                             |
+| State       | `flutter_riverpod` 3                                                                                             |
+| Routing     | `go_router` (`StatefulShellRoute` with 4 tabs)                                                                   |
+| Persistence | `drift` + `drift_flutter` (SQLite, WAL)                                                                          |
+| Icons       | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                    |
+| Platform    | `flutter_local_notifications`, `flutter_timezone`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions` |
 
 ## Getting started
 
@@ -71,6 +73,9 @@ test/               unit, in-memory DB, chart, and schema migration tests
 - App lock is a device setting: it isn’t exported, and importing a backup keeps this device’s choice.
 - Warm-up sets are kept but left out of totals, stats, and records.
 - Backups are versioned JSON files (format v3, max 20 MB). Import validates the file and then replaces all data in a single transaction. Backups from older versions still import.
+- Home suggests a backup after every 10 finished workouts, and Settings shows the date of the last one. Importing a backup counts as backed up from the day the file was made.
+- Import and “Delete all data” are refused while a workout is running.
+- The CSV export is for spreadsheets and can’t be imported. Weights are listed in kg and in your unit.
 
 ## Contributing
 

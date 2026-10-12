@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/backup_service.dart';
 import '../../data/database.dart';
+import '../../domain/reminders.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../services/app_lock.dart';
@@ -14,6 +15,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/bodyweight_dialog.dart';
 import '../../widgets/common.dart';
+import 'backup_actions.dart';
 import 'balance_band_dialog.dart';
 import 'barbell_settings.dart';
 
@@ -99,27 +101,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     );
   }
 
+  Widget _dayChip(UserSettings s, int weekday) => ChoiceChip(
+    label: Text(DateFormat.E().format(DateTime(2024, 1, weekday))),
+    selected: reminderOn(s.reminderDays, weekday),
+    onSelected: (_) => _toggleReminderDay(s, weekday),
+  );
+
+  Future<void> _toggleReminderDay(UserSettings s, int weekday) async {
+    final days = toggleReminderDay(s.reminderDays, weekday);
+    if (s.reminderDays == 0 &&
+        !await ref.read(notificationsProvider).requestPermission()) {
+      if (mounted) {
+        toast(context, 'Allow notifications in system settings for reminders');
+      }
+      return;
+    }
+    await _ctrl.setReminders(days: days);
+  }
+
+  Future<void> _editReminderTime(UserSettings s) async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: s.reminderMinutes ~/ 60,
+        minute: s.reminderMinutes % 60,
+      ),
+    );
+    if (t != null) await _ctrl.setReminders(minutes: t.hour * 60 + t.minute);
+  }
+
   Future<void> _export() async {
     setState(() => _busy = true);
-    try {
-      final bytes = await ref.read(backupProvider).export();
-      final name =
-          'lift_flow_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.json';
-      final uri = await FilePicker.saveFile(
-        dialogTitle: 'Save backup',
-        fileName: name,
-        bytes: bytes,
-        mimeType: 'application/json',
-      );
-      if (mounted && uri != null) toast(context, 'Backup saved');
-    } catch (e) {
-      if (mounted) toast(context, 'Export failed');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await exportBackup(context, ref);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _exportCsv() async {
+    setState(() => _busy = true);
+    await exportSetsCsv(context, ref);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  /// Import and delete-all would orphan the running workout.
+  bool _blockedByWorkout() {
+    final blocked = ref.read(liveWorkoutProvider) != null;
+    if (blocked) toast(context, BackupBlockedException.message);
+    return blocked;
   }
 
   Future<void> _import() async {
+    if (_blockedByWorkout()) return;
     final ok = await confirm(
       context,
       title: 'Import backup?',
@@ -138,10 +169,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       }
       final bytes = await file.readAsBytes();
       await ref.read(backupProvider).import(bytes);
-      await _afterReset();
+      await resetAppState(ref);
       if (mounted) toast(context, 'Backup imported');
     } on BackupFormatException catch (e) {
       if (mounted) toast(context, e.message);
+    } on BackupBlockedException catch (e) {
+      if (mounted) toast(context, e.toString());
     } catch (e) {
       if (mounted) toast(context, 'Import failed');
     } finally {
@@ -150,6 +183,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 
   Future<void> _deleteAll() async {
+    if (_blockedByWorkout()) return;
     final ok = await confirm(
       context,
       title: 'Delete all data?',
@@ -160,14 +194,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       destructive: true,
     );
     if (!ok) return;
-    await ref.read(backupProvider).deleteAll();
-    await _afterReset();
-    if (mounted) toast(context, 'All data deleted');
-  }
-
-  Future<void> _afterReset() async {
-    ref.read(restTimerProvider.notifier).skip();
-    await _ctrl.reload();
+    try {
+      await ref.read(backupProvider).deleteAll();
+      await resetAppState(ref);
+      if (mounted) toast(context, 'All data deleted');
+    } on BackupBlockedException catch (e) {
+      if (mounted) toast(context, e.toString());
+    }
   }
 
   @override
@@ -362,6 +395,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ),
             const SectionLabel('Barbell'),
             const BarbellSettings(),
+            const SectionLabel('Reminders'),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Training days', style: t.titleMedium),
+                  const SizedBox(height: Space.sm),
+                  Wrap(
+                    spacing: Space.sm,
+                    runSpacing: Space.sm,
+                    children: [
+                      for (var i = 0; i < 7; i++)
+                        _dayChip(s, (s.firstDayOfWeek - 1 + i) % 7 + 1),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              title: const Text('Reminder time'),
+              subtitle: s.reminderDays == 0
+                  ? const Text('Pick a training day first')
+                  : const Text('Local time, repeats weekly'),
+              trailing: Text(
+                TimeOfDay(
+                  hour: s.reminderMinutes ~/ 60,
+                  minute: s.reminderMinutes % 60,
+                ).format(context),
+                style: t.bodyLarge?.copyWith(
+                  color: s.reminderDays == 0 ? muted : null,
+                  fontWeight: s.reminderDays == 0 ? null : FontWeight.w600,
+                ),
+              ),
+              enabled: s.reminderDays != 0,
+              onTap: () => _editReminderTime(s),
+            ),
             const SectionLabel('Appearance'),
             _SegmentTile<ThemePref>(
               title: 'Theme',
@@ -371,6 +444,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               onChanged: (v) =>
                   _ctrl.update(AppSettingsCompanion(themeMode: Value(v))),
             ),
+            if (ref.watch(dynamicSchemesProvider) != null)
+              SwitchListTile(
+                title: const Text('Material You'),
+                subtitle: const Text('Use your wallpaper colors'),
+                value: s.dynamicColor,
+                onChanged: (v) =>
+                    _ctrl.update(AppSettingsCompanion(dynamicColor: Value(v))),
+              ),
             SwitchListTile(
               title: const Text('Pure black'),
               subtitle: const Text('Dark theme on a black background'),
@@ -401,8 +482,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ListTile(
               leading: const AppIcon(AppIcons.exportFile),
               title: const Text('Export backup'),
-              subtitle: const Text('Save all data as a JSON file'),
+              subtitle: Text(
+                s.lastBackupAt == null
+                    ? 'All data as a JSON file · never backed up'
+                    : 'All data as a JSON file · last backup '
+                          '${DateFormat('d MMM yyyy').format(s.lastBackupAt!)}',
+              ),
               onTap: _export,
+            ),
+            ListTile(
+              leading: const AppIcon(AppIcons.exportFile),
+              title: const Text('Export sets as CSV'),
+              subtitle: const Text('One row per set, for spreadsheets'),
+              onTap: _exportCsv,
             ),
             ListTile(
               leading: const AppIcon(AppIcons.importFile),

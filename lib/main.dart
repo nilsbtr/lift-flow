@@ -11,6 +11,7 @@ import 'data/workout_repository.dart';
 import 'providers.dart';
 import 'services/notifications.dart';
 import 'theme/app_icons.dart';
+import 'theme/dynamic_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +29,7 @@ Future<void> main() async {
 
   final db = AppDatabase();
   final notifications = NotificationService();
-  final (settings, live, rest, _, _, pkg, _) = await (
+  final (settings, live, rest, _, _, pkg, _, dynamicSchemes) = await (
     SettingsRepository(db).get(),
     WorkoutRepository(db).getLive(),
     RestRepository(db).get(),
@@ -37,6 +38,7 @@ Future<void> main() async {
     PackageInfo.fromPlatform(),
     // Drops a past workout abandoned by a killed app.
     WorkoutRepository(db).purgeEmpty(),
+    loadDynamicSchemes(),
   ).wait;
 
   runApp(
@@ -49,6 +51,7 @@ Future<void> main() async {
         initialLiveWorkoutProvider.overrideWithValue(live),
         initialRestProvider.overrideWithValue(rest),
         initialPackageInfoProvider.overrideWithValue(pkg),
+        dynamicSchemesProvider.overrideWithValue(dynamicSchemes),
       ],
       child: const LiftFlowApp(),
     ),

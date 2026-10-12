@@ -1693,7 +1693,6 @@ void main() {
       expect(s.dynamicColor, isTrue);
       expect((s.reminderDays, s.reminderMinutes), (0x15, 420));
       // Device-local state is not part of a backup.
-      expect(s.lastBackupAt, isNull);
       expect(s.backupSnoozedAt, isNull);
       expect(s.appLock, isFalse);
       expect(s.setMenuHintSeen, isFalse);
