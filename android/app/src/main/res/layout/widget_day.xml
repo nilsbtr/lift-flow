@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    style="@style/LiftWidgetDay">
+
+    <TextView
+        android:id="@+id/widget_day_letter"
+        style="@style/LiftWidgetLetter" />
+
+    <ImageView
+        android:id="@+id/widget_day_dot"
+        style="@style/LiftWidgetDot" />
+</LinearLayout>

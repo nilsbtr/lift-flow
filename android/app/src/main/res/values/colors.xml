@@ -2,4 +2,12 @@
 <resources>
     <color name="splash_bg">#F4F5F6</color>
     <color name="ic_launcher_background">#1E3A8A</color>
+    <!-- The home-screen widget; mirrors Palette in lib/theme/tokens.dart. -->
+    <color name="widget_surface">#FFFFFF</color>
+    <color name="widget_muted">#5F676F</color>
+    <color name="widget_outline">#D9DDE1</color>
+    <color name="widget_primary">#2E6CB8</color>
+    <color name="widget_done">#2A7F57</color>
+    <color name="widget_on_accent">#FFFFFF</color>
+    <color name="widget_ripple">#33FFFFFF</color>
 </resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launchers before Android 12 pad widgets themselves. -->
+    <dimen name="widget_padding">8dp</dimen>
+    <dimen name="widget_radius">16dp</dimen>
+    <dimen name="widget_inner_radius">12dp</dimen>
+    <dimen name="widget_dot">18dp</dimen>
+</resources>
