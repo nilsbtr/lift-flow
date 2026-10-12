@@ -16,4 +16,54 @@
     <style name="NormalTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@color/splash_bg</item>
     </style>
+
+    <!-- Home-screen widget. -->
+    <style name="LiftWidgetRoot">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:background">@drawable/widget_background</item>
+        <item name="android:clipToOutline">true</item>
+        <item name="android:padding">@dimen/widget_padding</item>
+    </style>
+    <style name="LiftWidgetDay">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+    <style name="LiftWidgetLetter">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginBottom">4dp</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/widget_muted</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+    <style name="LiftWidgetDot">
+        <item name="android:layout_width">@dimen/widget_dot</item>
+        <item name="android:layout_height">@dimen/widget_dot</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+    <style name="LiftWidgetButton">
+        <item name="android:background">@drawable/widget_button</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+    </style>
+    <style name="LiftWidgetLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">6dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/widget_on_accent</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 </resources>

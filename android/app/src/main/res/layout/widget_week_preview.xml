@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the widget picker shows on Android 12+: widget_week with sample days. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    style="@style/LiftWidgetRoot"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:id="@+id/widget_week"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="5"
+        android:orientation="horizontal">
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="M" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot_done" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="T" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="W" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot_done" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="T" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot_today" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="F" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="S" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/LiftWidgetDay">
+
+            <TextView
+                style="@style/LiftWidgetLetter"
+                android:text="S" />
+
+            <ImageView
+                style="@style/LiftWidgetDot"
+                android:src="@drawable/widget_dot" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_button"
+        style="@style/LiftWidgetButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_weight="4">
+
+        <ImageView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_widget_play" />
+
+        <TextView
+            android:id="@+id/widget_label"
+            style="@style/LiftWidgetLabel"
+            android:text="@string/widget_preview_template" />
+    </LinearLayout>
+</LinearLayout>
