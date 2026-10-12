@@ -345,7 +345,12 @@ class _TopLiftsCard extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(
-                              fmtMetric(l.metric, l.series.last.value, unit),
+                              fmtMetric(
+                                l.metric,
+                                l.series.last.value,
+                                unit,
+                                mode: l.exercise.loadMode,
+                              ),
                               style: t.titleSmall?.copyWith(
                                 fontFeatures: Fonts.tabular,
                               ),
@@ -356,6 +361,7 @@ class _TopLiftsCard extends ConsumerWidget {
                                   l.metric,
                                   l.series.last.value - l.series.first.value,
                                   unit,
+                                  mode: l.exercise.loadMode,
                                 ),
                                 style: t.bodySmall?.copyWith(
                                   color: lift.muted,
@@ -388,6 +394,9 @@ class _RecordsCard extends ConsumerWidget {
     PrKind.e1rm => TrendMetric.e1rm,
     PrKind.bestLoad => TrendMetric.bestLoad,
     PrKind.mostReps => TrendMetric.reps,
+    PrKind.longestTime => TrendMetric.time,
+    PrKind.longestDistance => TrendMetric.distance,
+    PrKind.bestPace => TrendMetric.pace,
   };
 
   /// The record kind to headline for an exercise, by its usual metrics.
@@ -453,7 +462,7 @@ class _RecordsCard extends ConsumerWidget {
                                   Text(e.name, style: t.bodyLarge),
                                   Text(
                                     '${kind.label} '
-                                    '${fmtMetric(_metricOf(kind), ev.values[kind]!, unit)}'
+                                    '${fmtMetric(_metricOf(kind), ev.values[kind]!, unit, mode: e.loadMode)}'
                                     '${more > 0 ? ' · +$more more' : ''}',
                                     style: t.bodySmall?.copyWith(
                                       color: lift.muted,

@@ -25,6 +25,7 @@ abstract final class AppIcons {
   static const more = AppIconData('more');
   static const drag = AppIconData('drag');
   static const playSolid = AppIconData('play_solid');
+  static const stopSolid = AppIconData('stop_solid');
   static const dumbbell = AppIconData('dumbbell');
   static const dumbbellSolid = AppIconData('dumbbell_solid');
   static const trash = AppIconData('trash');

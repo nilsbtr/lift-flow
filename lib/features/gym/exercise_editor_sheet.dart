@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/database.dart';
 import '../../data/exercise_repository.dart';
 import '../../domain/muscles.dart';
+import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
@@ -101,6 +102,9 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
       _error = null;
     });
     final repo = ref.read(exerciseRepoProvider);
+    // Only what the type offers is kept.
+    final perSide = _perSide && _type != TrackingType.distance;
+    final perDumbbell = _perDumbbell && _type.hasReps;
     try {
       final Exercise saved;
       final e = widget.existing;
@@ -112,8 +116,8 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
           loadMode: _mode,
           notes: _notes.text,
           equipment: _equipment,
-          perSide: _perSide,
-          perDumbbell: _perDumbbell,
+          perSide: perSide,
+          perDumbbell: perDumbbell,
           secondaryMuscles: secondary,
         );
       } else {
@@ -125,8 +129,8 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
           loadMode: _mode,
           notes: _notes.text,
           equipment: _equipment,
-          perSide: _perSide,
-          perDumbbell: _perDumbbell,
+          perSide: perSide,
+          perDumbbell: perDumbbell,
           secondaryMuscles: secondary,
         );
         saved = (await repo.getById(e.id))!;
@@ -157,6 +161,13 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
     final missingBodyweight =
         _type == TrackingType.bodyweight &&
         ref.watch(settingsProvider.select((s) => s.bodyweightKg)) == null;
+    final mode = _mode.forType(_type);
+    final distanceUnit = _type != TrackingType.distance
+        ? null
+        : DistanceUnit.of(
+            ref.watch(settingsProvider.select((s) => s.weightUnit)),
+            mode,
+          ).label;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
@@ -299,7 +310,7 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
             duration: Motion.of(context, Motion.medium),
             curve: Motion.curve,
             alignment: Alignment.topCenter,
-            child: _type == TrackingType.bodyweight
+            child: _type != TrackingType.weights
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -310,19 +321,34 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
                         runSpacing: Space.sm,
                         children: [
                           for (final m in LoadMode.values)
-                            ChoiceChip(
-                              label: Text(m.label),
-                              selected: _mode == m,
-                              onSelected: (_) => setState(() => _mode = m),
-                            ),
+                            if (m.forType(_type) == m)
+                              ChoiceChip(
+                                label: Text(
+                                  m == LoadMode.none && !_type.hasReps
+                                      ? 'No weight'
+                                      : m.label,
+                                ),
+                                selected: mode == m,
+                                onSelected: (_) => setState(() => _mode = m),
+                              ),
                         ],
                       ),
                       const SizedBox(height: Space.sm),
-                      Text(switch (_mode) {
-                        LoadMode.none => 'Track reps only.',
-                        LoadMode.added =>
+                      Text(switch ((_type, mode)) {
+                        (TrackingType.duration, LoadMode.none) =>
+                          'Track time only, e.g. a plank or a hang.',
+                        (TrackingType.duration, _) =>
+                          'Log the weight too, e.g. a weighted plank or hold.',
+                        (TrackingType.distance, LoadMode.none) =>
+                          'Track distance in $distanceUnit, with a time if '
+                              'you like, e.g. a run or a row.',
+                        (TrackingType.distance, _) =>
+                          'Log the weight too, e.g. a carry or a sled push. '
+                              'Distance is in $distanceUnit.',
+                        (_, LoadMode.none) => 'Track reps only.',
+                        (_, LoadMode.added) =>
                           'Log extra weight, e.g. a dip belt or vest.',
-                        LoadMode.assisted =>
+                        (_, LoadMode.assisted) =>
                           'Log assistance, e.g. a band or assisted machine.',
                       }, style: t.bodySmall?.copyWith(color: lift.muted)),
                       if (missingBodyweight) ...[
@@ -355,14 +381,17 @@ class _ExerciseEditorSheetState extends ConsumerState<ExerciseEditorSheet> {
             ],
           ),
           const SizedBox(height: Space.sm),
-          _Toggle(
-            title: 'Per side',
-            subtitle:
-                'Reps are logged for one side, so volume counts them twice.',
-            value: _perSide,
-            onChanged: (v) => setState(() => _perSide = v),
-          ),
-          if (_equipment == Equipment.dumbbell)
+          if (_type != TrackingType.distance)
+            _Toggle(
+              title: 'Per side',
+              subtitle: _type.hasReps
+                  ? 'Reps are logged for one side, so volume counts them twice.'
+                  : 'Time is logged for one side, so total time counts it '
+                        'twice.',
+              value: _perSide,
+              onChanged: (v) => setState(() => _perSide = v),
+            ),
+          if (_equipment == Equipment.dumbbell && _type.hasReps)
             _Toggle(
               title: 'Per dumbbell',
               subtitle:

@@ -153,12 +153,17 @@ enum TrendMetric {
   heaviest('Heaviest'),
   bestLoad('Best load'),
   reps('Most reps'),
-  volume('Volume');
+  volume('Volume'),
+  time('Longest time'),
+  totalTime('Total time'),
+  distance('Longest distance'),
+  totalDistance('Total distance'),
+
+  /// The fastest set, as a speed in m/s so that higher is better.
+  pace('Best pace');
 
   const TrendMetric(this.label);
   final String label;
-
-  bool get isWeight => this != reps;
 }
 
 /// Metrics that make sense for an exercise, most useful first.
@@ -168,6 +173,17 @@ List<TrendMetric> metricsFor(TrackingType type, LoadMode mode) =>
         TrendMetric.e1rm,
         TrendMetric.heaviest,
         TrendMetric.volume,
+      ],
+      (TrackingType.duration, _) => [
+        TrendMetric.time,
+        TrendMetric.totalTime,
+        if (mode != LoadMode.none) TrendMetric.heaviest,
+      ],
+      (TrackingType.distance, _) => [
+        TrendMetric.distance,
+        TrendMetric.totalDistance,
+        TrendMetric.pace,
+        if (mode != LoadMode.none) TrendMetric.heaviest,
       ],
       (_, LoadMode.none) => const [
         TrendMetric.reps,
@@ -182,14 +198,56 @@ List<TrendMetric> metricsFor(TrackingType type, LoadMode mode) =>
       ],
     };
 
-/// A metric value in the display unit, for charts.
-double metricDisplay(TrendMetric m, double v, WeightUnit unit) =>
-    m.isWeight ? kgToUnit(v, unit) : v;
+/// A metric value in the display unit, for charts. Times stay seconds and a
+/// pace stays a speed in m/s; [fmtMetricAxis] labels them. [mode] is the
+/// exercise's, which picks the distance unit.
+double metricDisplay(
+  TrendMetric m,
+  double v,
+  WeightUnit unit, {
+  LoadMode mode = LoadMode.none,
+}) => switch (m) {
+  TrendMetric.reps ||
+  TrendMetric.time ||
+  TrendMetric.totalTime ||
+  TrendMetric.pace => v,
+  TrendMetric.distance ||
+  TrendMetric.totalDistance => v / DistanceUnit.of(unit, mode).metres,
+  _ => kgToUnit(v, unit),
+};
 
-/// "82.5 kg", "12 reps", "+10 kg", "BW". Estimates get one decimal.
-String fmtMetric(TrendMetric m, double v, WeightUnit unit) => switch (m) {
+/// Axis label for a [metricDisplay] value: "1:30" for a time, "5:30" for a
+/// pace, else a short number in the unit of [fmtMetric].
+String fmtMetricAxis(
+  TrendMetric m,
+  double v,
+  WeightUnit unit, {
+  LoadMode mode = LoadMode.none,
+}) => switch (m) {
+  TrendMetric.time || TrendMetric.totalTime => fmtHms(v.round()),
+  TrendMetric.pace when v <= 0 => '',
+  TrendMetric.pace => fmtHms(
+    (DistanceUnit.of(unit, mode).paceMetres / v).round(),
+  ),
+  _ => fmtCompact(v),
+};
+
+/// "82.5 kg", "12 reps", "+10 kg", "BW", "1:30", "5 km", "5:30 /km".
+/// Estimates get one decimal.
+String fmtMetric(
+  TrendMetric m,
+  double v,
+  WeightUnit unit, {
+  LoadMode mode = LoadMode.none,
+}) => switch (m) {
   TrendMetric.reps => '${v.round()} reps',
   TrendMetric.volume => fmtVolume(v, unit),
+  TrendMetric.time || TrendMetric.totalTime => fmtHms(v.round()),
+  TrendMetric.distance || TrendMetric.totalDistance => _fmtDistance(
+    v,
+    DistanceUnit.of(unit, mode),
+  ),
+  TrendMetric.pace => fmtPace(v, DistanceUnit.of(unit, mode)),
   TrendMetric.e1rm => '${_fmt1(kgToUnit(v, unit))} ${unit.label}',
   TrendMetric.bestLoad when v.abs() < 1e-6 => 'BW',
   TrendMetric.bestLoad =>
@@ -197,9 +255,29 @@ String fmtMetric(TrendMetric m, double v, WeightUnit unit) => switch (m) {
   _ => '${fmtWeight(v, unit)} ${unit.label}',
 };
 
-/// "+2.5 kg", "−1 reps", "+1.2K kg".
-String fmtMetricDelta(TrendMetric m, double d, WeightUnit unit) => switch (m) {
+String _fmtDistance(double metres, DistanceUnit u) =>
+    '${fmtDistance(metres, u)} ${u.label}';
+
+/// "+2.5 kg", "−1 reps", "+1.2K kg", "+0:15", "+0.5 km". A pace changes by
+/// its speed: "+0.4 km/h".
+String fmtMetricDelta(
+  TrendMetric m,
+  double d,
+  WeightUnit unit, {
+  LoadMode mode = LoadMode.none,
+}) => switch (m) {
   TrendMetric.reps => '${fmtDelta(d, (v) => '${v.round()}')} reps',
+  TrendMetric.time ||
+  TrendMetric.totalTime => fmtDelta(d, (v) => fmtHms(v.round())),
+  TrendMetric.distance || TrendMetric.totalDistance => switch (DistanceUnit.of(
+    unit,
+    mode,
+  )) {
+    final u => '${fmtDelta(d / u.metres)} ${u.label}',
+  },
+  TrendMetric.pace => switch (DistanceUnit.of(unit, mode)) {
+    final u => '${fmtDelta(speedIn(d, u), _fmt1)} ${u.speedLabel}',
+  },
   TrendMetric.volume => '${fmtDelta(kgToUnit(d, unit), fmtCompact)} ${unit.label}',
   TrendMetric.e1rm => '${fmtDelta(kgToUnit(d, unit), _fmt1)} ${unit.label}',
   _ => '${fmtDelta(kgToUnit(d, unit))} ${unit.label}',
@@ -209,7 +287,9 @@ String _fmt1(double v) => fmtNum((v * 10).roundToDouble() / 10);
 
 /// Value of [metric] over the sets of one session, or null if it doesn't apply.
 double? metricValue(TrendMetric metric, Iterable<SetFact> sets) {
-  final valid = sets.where((f) => (f.reps ?? 0) > 0);
+  final logged = sets.where((f) => f.isLogged);
+  final valid = logged.where((f) => f.type.hasReps);
+  double? positive(double v) => v > 0 ? v : null;
   return switch (metric) {
     TrendMetric.e1rm => valid.map((f) {
       final load = effectiveLoad(
@@ -219,7 +299,13 @@ double? metricValue(TrendMetric metric, Iterable<SetFact> sets) {
       );
       return load == null ? null : estimateOneRm(load, f.reps!);
     }).nonNulls.maxOrNull,
-    TrendMetric.heaviest => valid.map((f) => f.loadKg).nonNulls.maxOrNull,
+    // Like the PR rule: a time or distance set needs a load to count.
+    TrendMetric.heaviest =>
+      logged
+          .map((f) => f.loadKg)
+          .nonNulls
+          .where((l) => valid.isNotEmpty || l > 0)
+          .maxOrNull,
     TrendMetric.bestLoad => valid.map((f) => f.loadKg ?? 0).maxOrNull,
     // Like the PR rule: assisted reps don't count.
     TrendMetric.reps =>
@@ -227,10 +313,20 @@ double? metricValue(TrendMetric metric, Iterable<SetFact> sets) {
           .where((f) => (f.loadKg ?? 0) >= -1e-6)
           .map((f) => f.reps!.toDouble())
           .maxOrNull,
-    TrendMetric.volume => switch (valid.map((f) => f.volume).sum) {
-      final v when v > 0 => v,
-      _ => null,
-    },
+    TrendMetric.volume => positive(valid.map((f) => f.volume).sum),
+    TrendMetric.time =>
+      logged.map((f) => f.durationSeconds?.toDouble()).nonNulls.maxOrNull,
+    // Per side, the time was held twice.
+    TrendMetric.totalTime => positive(
+      logged
+          .map((f) => (f.durationSeconds ?? 0) * (f.perSide ? 2.0 : 1.0))
+          .sum,
+    ),
+    TrendMetric.distance => logged.map((f) => f.distanceM).nonNulls.maxOrNull,
+    TrendMetric.totalDistance => positive(
+      logged.map((f) => f.distanceM ?? 0).sum,
+    ),
+    TrendMetric.pace => logged.map((f) => f.speed).nonNulls.maxOrNull,
   };
 }
 
@@ -297,6 +393,8 @@ List<SetFact> sessionFacts(Exercise e, Iterable<ExerciseSession> sessions) => [
           loadKg: set.loadKg,
           reps: set.reps,
           bodyweightKg: s.workout.bodyweightKg,
+          durationSeconds: set.durationSeconds,
+          distanceM: set.distanceM,
           muscleGroup: e.muscleGroup,
           secondaryMuscles: e.secondaryMuscles,
           perSide: e.perSide,

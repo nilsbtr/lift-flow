@@ -236,18 +236,22 @@ class _ExercisePickerSheetState extends ConsumerState<ExercisePickerSheet> {
   }
 }
 
-/// Equipment and type for a list subtitle, e.g. "Barbell" or "Bodyweight".
+/// Equipment and type for a list subtitle, e.g. "Barbell", "Bodyweight" or
+/// "Kettlebell · Distance + weight".
 String exerciseSubtitle(Exercise e) => [
   if (e.equipment != Equipment.none) e.equipment.label,
   if (e.equipment == Equipment.none ||
-      e.trackingType == TrackingType.bodyweight)
+      e.trackingType != TrackingType.weights)
     exerciseTypeLabel(e),
 ].join(' · ');
 
-String exerciseTypeLabel(Exercise e) => e.trackingType == TrackingType.weights
-    ? 'Weights'
-    : switch (e.loadMode) {
-        LoadMode.none => 'Bodyweight',
-        LoadMode.added => 'Bodyweight + weight',
-        LoadMode.assisted => 'Assisted bodyweight',
-      };
+String exerciseTypeLabel(Exercise e) => switch ((e.trackingType, e.loadMode)) {
+  (TrackingType.weights, _) => 'Weights',
+  (TrackingType.duration, LoadMode.none) => 'Time',
+  (TrackingType.duration, _) => 'Time + weight',
+  (TrackingType.distance, LoadMode.none) => 'Distance',
+  (TrackingType.distance, _) => 'Distance + weight',
+  (_, LoadMode.none) => 'Bodyweight',
+  (_, LoadMode.added) => 'Bodyweight + weight',
+  (_, LoadMode.assisted) => 'Assisted bodyweight',
+};

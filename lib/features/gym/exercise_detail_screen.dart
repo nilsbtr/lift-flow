@@ -91,8 +91,20 @@ class ExerciseDetailScreen extends ConsumerWidget {
       unit: unit,
     );
 
+    final distanceUnit = DistanceUnit.of(unit, exercise.loadMode);
     final stats = <(String, String)>[
-      if (exercise.trackingType == TrackingType.weights) ...[
+      if (!exercise.trackingType.hasReps) ...[
+        if (bests.longestTime case final s?) ('Longest time', fmtHms(s)),
+        if (bests.longestDistance case final m?)
+          (
+            'Longest distance',
+            '${fmtDistance(m, distanceUnit)} ${distanceUnit.label}',
+          ),
+        if (bests.bestPace case final v?)
+          ('Best pace', fmtPace(v, distanceUnit)),
+        if (bests.heaviest != null)
+          ('Heaviest', '${fmtWeight(bests.heaviest!, unit)} ${unit.label}'),
+      ] else if (exercise.trackingType == TrackingType.weights) ...[
         if (bests.heaviest != null)
           ('Heaviest', '${fmtWeight(bests.heaviest!, unit)} ${unit.label}'),
       ] else ...[

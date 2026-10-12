@@ -299,12 +299,12 @@ class _LiftRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                fmtMetric(m, insight.value, unit),
+                fmtMetric(m, insight.value, unit, mode: exercise.loadMode),
                 style: t.titleSmall?.copyWith(fontFeatures: Fonts.tabular),
               ),
               if (delta != null)
                 Text(
-                  fmtMetricDelta(m, delta, unit),
+                  fmtMetricDelta(m, delta, unit, mode: exercise.loadMode),
                   style: t.bodySmall?.copyWith(
                     color: delta > 1e-6 ? lift.done : lift.muted,
                     fontFeatures: Fonts.tabular,

@@ -7,7 +7,7 @@ import '../domain/csv_export.dart';
 import '../domain/muscles.dart';
 import 'database.dart';
 
-const int kBackupVersion = 3;
+const int kBackupVersion = 4;
 const int kMaxBackupBytes = 20 * 1024 * 1024;
 
 class BackupFormatException implements Exception {
@@ -645,7 +645,7 @@ ParsedBackup parseBackup(Uint8List bytes) {
             workoutExerciseId: 0,
             position: _int(st, 'position', min: 0),
             loadKg: Value(
-              type == TrackingType.bodyweight && mode == LoadMode.none
+              type != TrackingType.weights && mode == LoadMode.none
                   ? null
                   : load,
             ),

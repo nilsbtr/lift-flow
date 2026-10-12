@@ -60,13 +60,23 @@ enum Equipment {
 
 enum TrackingType {
   weights('Weights'),
-  bodyweight('Bodyweight');
+  bodyweight('Bodyweight'),
+
+  /// Sets record a time: planks, holds, carries for time.
+  duration('Time'),
+
+  /// Sets record a distance and, if wanted, a time: runs, rows, carries.
+  distance('Distance');
 
   const TrackingType(this.label);
   final String label;
+
+  /// Whether sets count reps. The others record a time or a distance instead.
+  bool get hasReps => this == weights || this == bodyweight;
 }
 
-/// How the load column works for bodyweight exercises. Ignored for weights.
+/// How the load column works for every type but weights, which ignore it.
+/// Time and distance exercises use `none` and `added` only.
 ///
 /// Loads are stored signed: `added` >= 0, `assisted` <= 0, `none` is null.
 enum LoadMode {
@@ -76,6 +86,14 @@ enum LoadMode {
 
   const LoadMode(this.label);
   final String label;
+
+  /// This mode as [type] can have it.
+  LoadMode forType(TrackingType type) => switch (type) {
+    TrackingType.weights => none,
+    TrackingType.bodyweight => this,
+    TrackingType.duration ||
+    TrackingType.distance => this == assisted ? none : this,
+  };
 }
 
 enum SetType {

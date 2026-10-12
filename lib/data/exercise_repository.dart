@@ -83,9 +83,7 @@ class ExerciseRepository {
             name: n,
             muscleGroup: muscleGroup,
             trackingType: trackingType,
-            loadMode: Value(
-              trackingType == TrackingType.weights ? LoadMode.none : loadMode,
-            ),
+            loadMode: Value(loadMode.forType(trackingType)),
             notes: Value(_cleanNotes(notes)),
             createdAt: DateTime.now(),
             equipment: Value(equipment),
@@ -128,9 +126,7 @@ class ExerciseRepository {
           name: Value(n),
           muscleGroup: Value(muscleGroup),
           trackingType: Value(type),
-          loadMode: Value(
-            type == TrackingType.weights ? LoadMode.none : loadMode,
-          ),
+          loadMode: Value(loadMode.forType(type)),
           notes: Value(_cleanNotes(notes)),
           equipment: Value.absentIfNull(equipment),
           perSide: Value.absentIfNull(perSide),
