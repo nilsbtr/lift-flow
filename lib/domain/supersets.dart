@@ -4,6 +4,21 @@ import 'dart:math' as math;
 /// A value on a single exercise, or shared by exercises that are apart, does
 /// not link anything.
 
+/// Every superset as `[start, end)`, in list order.
+List<(int, int)> supersetRuns(List<int?> groups) {
+  final runs = <(int, int)>[];
+  for (var i = 0; i < groups.length;) {
+    final run = supersetRun(groups, i);
+    if (run == null) {
+      i++;
+    } else {
+      runs.add((run.start, run.end));
+      i = run.end;
+    }
+  }
+  return runs;
+}
+
 /// The superset around [index] as `[start, end)`. Null when it stands alone.
 ({int start, int end})? supersetRun(List<int?> groups, int index) {
   final g = groups[index];
@@ -37,6 +52,42 @@ List<int?> dropLoneGroups(List<int?> groups) => [
     supersetRun(groups, i) == null ? null : groups[i],
 ];
 
+/// Drops lone groups, splits groups that are apart and numbers the rest
+/// 1, 2, … in list order.
+List<int?> normalizeGroups(List<int?> groups) {
+  final out = List<int?>.filled(groups.length, null);
+  var next = 1;
+  for (final (s, e) in supersetRuns(groups)) {
+    for (var i = s; i < e; i++) {
+      out[i] = next;
+    }
+    next++;
+  }
+  return out;
+}
+
+/// Whether the exercise at [index] and the one after it are in one superset.
+bool isLinkedWithNext(List<int?> groups, int index) =>
+    index >= 0 &&
+    index + 1 < groups.length &&
+    groups[index] != null &&
+    groups[index] == groups[index + 1];
+
+/// Links the exercise at [index] with the next one, or splits them apart if
+/// already linked, and normalizes the result.
+List<int?> toggleLinkWithNext(List<int?> groups, int index) {
+  if (index < 0 || index + 1 >= groups.length) return normalizeGroups(groups);
+  if (!isLinkedWithNext(groups, index)) {
+    return normalizeGroups(linkGroups(groups, index));
+  }
+  final g = [...groups];
+  final fresh = g.whereType<int>().fold(0, math.max) + 1;
+  for (var j = index + 1; j < g.length && g[j] == groups[index]; j++) {
+    g[j] = fresh;
+  }
+  return normalizeGroups(g);
+}
+
 /// Links the exercise at [index] with the one after it, merging the supersets
 /// either of them is in.
 List<int?> linkGroups(List<int?> groups, int index) {
@@ -55,13 +106,15 @@ List<int?> linkGroups(List<int?> groups, int index) {
 /// Moves the item at [from] to [target] (its index once it is taken out) and
 /// keeps supersets together: inside its own superset the item just changes
 /// place, anywhere else its whole superset moves with it, and nothing lands
-/// in the middle of another superset.
+/// in the middle of another superset. A superset dropped there snaps to its
+/// edge in the direction of the move, or to the nearer edge with [nearest].
 List<T> moveGrouped<T>(
   List<T> list,
   int from,
   int target,
-  int? Function(T) groupOf,
-) {
+  int? Function(T) groupOf, {
+  bool nearest = false,
+}) {
   final run = supersetRun([for (final x in list) groupOf(x)], from);
   final item = list[from];
   final rest = [...list]..removeAt(from);
@@ -77,7 +130,9 @@ List<T> moveGrouped<T>(
   if (t > 0 && t < others.length) {
     final split = supersetRun([for (final x in others) groupOf(x)], t);
     if (split != null && split.start < t) {
-      t = to >= from ? split.end : split.start;
+      t = (nearest ? t - split.start <= split.end - t : to < from)
+          ? split.start
+          : split.end;
     }
   }
   return others..insertAll(t, moving);

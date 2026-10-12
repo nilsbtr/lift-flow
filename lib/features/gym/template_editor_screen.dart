@@ -4,7 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/enums.dart';
 import '../../data/template_repository.dart';
-import '../../domain/superset_groups.dart';
+import '../../domain/supersets.dart';
 import '../../domain/units.dart';
 import '../../providers.dart';
 import '../../theme/app_icons.dart';
@@ -192,11 +192,10 @@ class _TemplateEditorScreenState extends ConsumerState<TemplateEditorScreen> {
 
   void _reorder(int from, int to) => setState(() {
     _dirty = true;
-    final order = reorderGroupIndices(
-      [for (final it in _items) it.supersetGroup],
-      from,
-      to,
-    );
+    final groups = normalizeGroups([for (final it in _items) it.supersetGroup]);
+    final order = moveGrouped([
+      for (var i = 0; i < groups.length; i++) i,
+    ], from, to, (i) => groups[i], nearest: true);
     final keys = [for (final i in order) _keys[i]];
     _items = [for (final i in order) _items[i]];
     _keys

@@ -5,7 +5,8 @@ import 'package:lift_flow/data/database.dart';
 import 'package:lift_flow/data/exercise_repository.dart';
 import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/template_repository.dart';
-import 'package:lift_flow/domain/superset_groups.dart';
+import 'package:lift_flow/data/workout_repository.dart';
+import 'package:lift_flow/domain/supersets.dart';
 import 'package:lift_flow/domain/units.dart';
 import 'package:lift_flow/features/gym/gym_screen.dart';
 import 'package:lift_flow/features/gym/template_editor_screen.dart';
@@ -75,6 +76,13 @@ void main() {
     });
 
     test('reorder keeps supersets together', () {
+      List<int> reorderGroupIndices(List<int?> groups, int from, int to) {
+        final g = normalizeGroups(groups);
+        return moveGrouped([
+          for (var i = 0; i < g.length; i++) i,
+        ], from, to, (i) => g[i], nearest: true);
+      }
+
       final g = <int?>[null, 1, 1, null];
       expect(reorderGroupIndices(g, 3, 0), [3, 0, 1, 2]);
       // Inside the superset: reorders its members.
@@ -189,6 +197,28 @@ void main() {
       expect([for (final i in got) i.supersetGroup], [1, 1, null]);
       expect(got[1].restSeconds, isNull);
       expect(got[1].targetWeightKg, isNull);
+    });
+
+    test('supersets survive template, workout and back', () async {
+      final items = normalizedSupersets([
+        TemplateItem(exercise: bench, targetSets: 3, supersetGroup: 1),
+        TemplateItem(exercise: row, targetSets: 3, supersetGroup: 1),
+        TemplateItem(exercise: curl, targetSets: 3),
+        TemplateItem(exercise: bench, targetSets: 3, supersetGroup: 2),
+        TemplateItem(exercise: row, targetSets: 3, supersetGroup: 2),
+        TemplateItem(exercise: curl, targetSets: 3, supersetGroup: 2),
+      ]);
+      final groups = [for (final i in items) i.supersetGroup];
+      expect(groups, [1, 1, null, 2, 2, 2]);
+      final id = await repo.save(name: 'Mixed', items: items);
+      final workouts = WorkoutRepository(db);
+      final wid = await workouts.start(templateId: id);
+      final back = await repo.itemsFromWorkout(wid);
+      expect([for (final i in back) i.supersetGroup], groups);
+      final copy = await repo.save(name: 'Copy', items: back);
+      expect([
+        for (final i in (await repo.get(copy))!.items) i.supersetGroup,
+      ], groups);
     });
 
     test('target weight converts at the UI edge only', () {
