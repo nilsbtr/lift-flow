@@ -22,19 +22,42 @@ final _exerciseWorkoutsProvider = FutureProvider.autoDispose
       return ref.read(workoutRepoProvider).workoutIdsWithExercise(exerciseId);
     });
 
+/// Search and view state. It outlives the screen, which is rebuilt when the
+/// window crosses the list-detail breakpoint.
+class _HistoryView {
+  String query = '';
+  bool searching = false;
+  bool calendar = false;
+  WorkoutTemplate? template;
+  Exercise? exercise;
+}
+
+final _historyViewProvider = Provider((ref) => _HistoryView());
+
 class HistoryScreen extends ConsumerStatefulWidget {
-  const HistoryScreen({super.key});
+  const HistoryScreen({super.key, this.selectedId});
+
+  /// The workout open in the detail pane beside the list, if any.
+  final int? selectedId;
 
   @override
   ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
-  final _query = TextEditingController();
-  bool _searching = false;
-  bool _calendar = false;
-  WorkoutTemplate? _template;
-  Exercise? _exercise;
+  late final _view = ref.read(_historyViewProvider);
+  late final TextEditingController _query = TextEditingController(
+    text: _view.query,
+  )..addListener(() => _view.query = _query.text);
+
+  bool get _searching => _view.searching;
+  set _searching(bool v) => _view.searching = v;
+  bool get _calendar => _view.calendar;
+  set _calendar(bool v) => _view.calendar = v;
+  WorkoutTemplate? get _template => _view.template;
+  set _template(WorkoutTemplate? v) => _view.template = v;
+  Exercise? get _exercise => _view.exercise;
+  set _exercise(Exercise? v) => _view.exercise = v;
 
   @override
   void dispose() {
@@ -157,6 +180,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             child: WorkoutSummaryCard(
               workout: w,
               unit: unit,
+              selected: w.id == widget.selectedId,
               onTap: () => context.go('/history/${w.id}'),
             ),
           );
@@ -346,11 +370,13 @@ class WorkoutSummaryCard extends StatelessWidget {
     super.key,
     required this.workout,
     required this.unit,
+    this.selected = false,
     this.onTap,
   });
 
   final Workout workout;
   final WeightUnit unit;
+  final bool selected;
   final VoidCallback? onTap;
 
   @override
@@ -366,6 +392,7 @@ class WorkoutSummaryCard extends StatelessWidget {
     ];
     return FlatCard(
       onTap: onTap,
+      color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
       child: Row(
         children: [
           SizedBox(
