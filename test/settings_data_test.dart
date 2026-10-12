@@ -321,6 +321,57 @@ void main() {
       expect(utf8.decode(bytes), contains('gut – 💪'));
     });
 
+    test('time in seconds and distance in metres', () async {
+      Future<int> timed(String name, TrackingType type) => db
+          .into(db.exercises)
+          .insert(
+            ExercisesCompanion.insert(
+              name: name,
+              muscleGroup: MuscleGroup.core,
+              trackingType: type,
+              createdAt: DateTime(2026, 1, 1),
+            ),
+          );
+      final w = await workout('Conditioning', DateTime(2026, 3, 5, 7));
+      final plank = await slot(
+        w,
+        await timed('Plank', TrackingType.duration),
+        0,
+      );
+      final run = await slot(w, await timed('Run', TrackingType.distance), 1);
+      await db
+          .into(db.workoutSets)
+          .insert(
+            WorkoutSetsCompanion.insert(
+              workoutExerciseId: plank,
+              position: 0,
+              isCompleted: const Value(true),
+              durationSeconds: const Value(90),
+            ),
+          );
+      await db
+          .into(db.workoutSets)
+          .insert(
+            WorkoutSetsCompanion.insert(
+              workoutExerciseId: run,
+              position: 0,
+              isCompleted: const Value(true),
+              durationSeconds: const Value(1650),
+              distanceM: const Value(5000),
+            ),
+          );
+
+      final rows = await lines(WeightUnit.lb);
+      expect(
+        rows[1],
+        '2026-03-05,07:00,Conditioning,Plank,Core,,1,Normal,,,lb,,,90,,,,',
+      );
+      expect(
+        rows[2],
+        '2026-03-05,07:00,Conditioning,Run,Core,,1,Normal,,,lb,,,1650,5000,,,',
+      );
+    });
+
     test('does not count as a backup', () async {
       await BackupService(db).exportCsv(WeightUnit.kg);
       expect((await SettingsRepository(db).get()).lastBackupAt, isNull);

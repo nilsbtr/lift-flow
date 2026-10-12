@@ -51,12 +51,13 @@ Future<void> exportSetsCsv(BuildContext context, WidgetRef ref) async {
 
 /// Drops what the app kept in memory about the old data, after an import or
 /// delete-all. Streams over the database update by themselves; the rest
-/// doesn't: workout editors, the asked-about-forgotten set, the rest timer
-/// (and its notifications) and the settings, whose startup copy is stale. The
-/// reminders follow the settings that came with the file.
+/// doesn't: workout editors, a running set stopwatch, the asked-about-forgotten
+/// set, the rest timer (and its notifications) and the settings, whose startup
+/// copy is stale. The reminders follow the settings that came with the file.
 Future<void> resetAppState(WidgetRef ref) async {
   ref.read(restTimerProvider.notifier).skip();
   ref.invalidate(workoutEditorProvider);
+  ref.invalidate(setStopwatchProvider);
   ref.invalidate(forgottenAskedProvider);
   unawaited(ref.read(notificationsProvider).clear());
   await ref.read(settingsProvider.notifier).reload();
