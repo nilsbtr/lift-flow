@@ -15,6 +15,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/bodyweight_dialog.dart';
 import '../../widgets/common.dart';
+import '../photos/photo_archive_actions.dart';
 import 'backup_actions.dart';
 import 'balance_band_dialog.dart';
 import 'barbell_settings.dart';
@@ -154,7 +155,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     final ok = await confirm(
       context,
       title: 'Import backup?',
-      message: 'This replaces all current data, including history.',
+      message:
+          'This replaces all current data, including history. Photos stay as '
+          'they are.',
       action: 'Choose file',
       destructive: true,
     );
@@ -182,13 +185,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }
   }
 
+  /// Runs a photo archive action with the screen locked, like the backup ones.
+  Future<void> _photoArchive(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _deleteAll() async {
     if (_blockedByWorkout()) return;
     final ok = await confirm(
       context,
       title: 'Delete all data?',
       message:
-          'Exercises, templates, history and settings will be removed. '
+          'Exercises, templates, history, photos and settings will be removed. '
           'This can’t be undone.',
       action: 'Delete everything',
       destructive: true,
@@ -196,6 +209,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (!ok) return;
     try {
       await ref.read(backupProvider).deleteAll();
+      await ref.read(photoServiceProvider).deleteAll();
       await resetAppState(ref);
       if (mounted) toast(context, 'All data deleted');
     } on BackupBlockedException catch (e) {
@@ -501,6 +515,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               title: const Text('Import backup'),
               subtitle: const Text('Replace all data from a file'),
               onTap: _import,
+            ),
+            ListTile(
+              leading: const AppIcon(AppIcons.exportFile),
+              title: const Text('Export photos'),
+              subtitle: const Text(
+                'Save all photos as one archive. The regular backup leaves '
+                'them out.',
+              ),
+              onTap: () => _photoArchive(() => exportPhotos(context, ref)),
+            ),
+            ListTile(
+              leading: const AppIcon(AppIcons.importFile),
+              title: const Text('Import photos'),
+              subtitle: const Text('Add photos from an archive. Yours are kept.'),
+              onTap: () => _photoArchive(() => importPhotos(context, ref)),
             ),
             ListTile(
               leading: AppIcon(
