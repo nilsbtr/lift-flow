@@ -129,8 +129,20 @@ class DraftExercise {
         );
         return working.isNotEmpty && topped ? step : null;
       case TrackingType.bodyweight:
+      case TrackingType.duration:
+      case TrackingType.distance:
         return null;
     }
+  }
+
+  /// The nearest set above [index] of the same kind: a working set doesn't
+  /// copy a warm-up. -1 if there is none.
+  int _above(int index) {
+    final warmup = sets[index].setType.isWarmup;
+    return sets
+        .take(index)
+        .toList()
+        .lastIndexWhere((s) => s.setType.isWarmup == warmup);
   }
 
   /// Placeholder values for a set: previous session → set above → target.
@@ -152,12 +164,7 @@ class DraftExercise {
         increase = true;
       }
     }
-    // The nearest set above of the same kind: a working set doesn't copy a
-    // warm-up.
-    final up = sets
-        .take(index)
-        .toList()
-        .lastIndexWhere((s) => s.setType.isWarmup == warmup);
+    final up = _above(index);
     if (up >= 0 && (load == null || reps == null)) {
       final above = sets[up];
       final aboveHint = hintFor(up);
@@ -171,10 +178,32 @@ class DraftExercise {
       reps ??= above.reps ?? aboveHint.reps;
     }
     if (!warmup && load == null && _fits(targetWeightKg)) load = targetWeightKg;
-    reps ??= repsMin;
+    reps = type.hasReps ? reps ?? repsMin : null;
     return hasLoad
         ? (load: load, reps: reps, increase: increase)
         : (load: null, reps: reps, increase: false);
+  }
+
+  /// Placeholder time or distance for a set: previous session → set above.
+  /// Only what the type needs has one. The time of a distance set is
+  /// optional, so it never takes a hint.
+  ({int? seconds, double? metres}) timedHintFor(int index) {
+    if (type.hasReps) return (seconds: null, metres: null);
+    final distance = type == TrackingType.distance;
+    final prev = previousFor(index);
+    var seconds = distance ? null : prev?.durationSeconds;
+    var metres = distance ? prev?.distanceM : null;
+    final up = _above(index);
+    if (up >= 0 && seconds == null && metres == null) {
+      final above = sets[up];
+      final hint = timedHintFor(up);
+      if (distance) {
+        metres = above.distanceM ?? hint.metres;
+      } else {
+        seconds = above.durationSeconds ?? hint.seconds;
+      }
+    }
+    return (seconds: seconds, metres: metres);
   }
 
   /// Index of the first working set.
@@ -206,6 +235,8 @@ class DraftExercise {
           barKg: exercise.equipment == Equipment.barbell ? barKg : null,
         );
       case TrackingType.bodyweight:
+      case TrackingType.duration:
+      case TrackingType.distance:
         return const [];
     }
   }
@@ -236,6 +267,8 @@ class DraftExercise {
                 loadKg: s.loadKg,
                 reps: s.reps,
                 bodyweightKg: bodyweightKg,
+                durationSeconds: s.durationSeconds,
+                distanceM: s.distanceM,
               )
             : null,
     ]);
@@ -245,26 +278,48 @@ class DraftExercise {
     };
   }
 
-  /// What ✓ stores for the set at [index]: empty fields take their hints.
-  /// Anything but [CompleteResult.ok] means there is nothing to fill in.
-  /// Keep in step with [WorkoutEditor.toggleDone].
-  ({CompleteResult result, double? load, int? reps}) completion(int index) {
+  /// What ✓ stores for the set at [index]: `set` is the set with its empty
+  /// fields filled from their hints, not yet marked done. Any result but
+  /// [CompleteResult.ok] names the field with nothing to fill in, and `set`
+  /// is unchanged. This is the one rule for [WorkoutEditor.toggleDone] and
+  /// [WorkoutEditor.markAllDone].
+  ///
+  /// Reps exercises need reps, and weights a weight too. A time exercise
+  /// needs a time and a distance exercise a distance. An extra load that is
+  /// left empty counts as none.
+  ({CompleteResult result, WorkoutSet set}) completion(int index) {
     final s = sets[index];
     final hint = hintFor(index);
+    final timed = timedHintFor(index);
     final reps = s.reps ?? hint.reps;
+    final seconds = s.durationSeconds ?? timed.seconds;
+    final metres = s.distanceM ?? timed.metres;
     double? load = hasLoad ? (s.loadKg ?? hint.load) : null;
-    if (reps == null || reps <= 0) {
-      return (result: CompleteResult.needsReps, load: null, reps: null);
-    }
-    if (type == TrackingType.weights && load == null) {
-      return (result: CompleteResult.needsWeight, load: null, reps: reps);
-    }
-    if (type == TrackingType.bodyweight && mode != LoadMode.none) load ??= 0;
-    return (result: CompleteResult.ok, load: load, reps: reps);
+    final missing = switch (type) {
+      TrackingType.weights when (reps ?? 0) > 0 && load == null =>
+        CompleteResult.needsWeight,
+      TrackingType.weights ||
+      TrackingType.bodyweight => (reps ?? 0) > 0 ? null : CompleteResult.needsReps,
+      TrackingType.duration =>
+        (seconds ?? 0) > 0 ? null : CompleteResult.needsTime,
+      TrackingType.distance =>
+        (metres ?? 0) > 0 ? null : CompleteResult.needsDistance,
+    };
+    if (missing != null) return (result: missing, set: s);
+    if (type != TrackingType.weights && mode != LoadMode.none) load ??= 0;
+    return (
+      result: CompleteResult.ok,
+      set: s.copyWith(
+        loadKg: Value(load),
+        reps: Value(reps),
+        durationSeconds: Value(seconds),
+        distanceM: Value(metres),
+      ),
+    );
   }
 }
 
-enum SetField { load, reps }
+enum SetField { load, reps, time, distance }
 
 /// Where typing continues once the set at [index] is completed: the next open
 /// set, in its load field if that is empty and in reps otherwise. Null after
@@ -279,7 +334,13 @@ enum SetField { load, reps }
 }
 
 SetField _openField(DraftExercise ex, WorkoutSet s) =>
-    ex.hasLoad && s.loadKg == null ? SetField.load : SetField.reps;
+    ex.hasLoad && s.loadKg == null
+    ? SetField.load
+    : switch (ex.type) {
+        TrackingType.duration => SetField.time,
+        TrackingType.distance => SetField.distance,
+        _ => SetField.reps,
+      };
 
 /// [nextField] across a superset: completing a working set moves on to the
 /// same round of the other exercises, the ones below first, and then to the
@@ -434,7 +495,37 @@ class WorkoutDraft {
   );
 }
 
-enum CompleteResult { ok, needsReps, needsWeight }
+enum CompleteResult { ok, needsReps, needsWeight, needsTime, needsDistance }
+
+/// The time set being timed in the app, if any. It is kept in memory only
+/// and has nothing to do with the rest timer.
+class SetStopwatch extends Notifier<({int setId, DateTime startedAt})?> {
+  @override
+  ({int setId, DateTime startedAt})? build() => null;
+
+  /// Starts timing [setId] from [at] (now), dropping a time still running.
+  void start(int setId, {DateTime? at}) =>
+      state = (setId: setId, startedAt: at ?? DateTime.now());
+
+  /// Stops timing [setId] and returns its whole seconds, at least 1. Null if
+  /// it wasn't being timed.
+  int? stop(int setId) {
+    final s = state;
+    if (s == null || s.setId != setId) return null;
+    state = null;
+    return math.max(1, DateTime.now().difference(s.startedAt).inSeconds);
+  }
+
+  /// Drops the running time if it is of one of [setIds].
+  void cancel(Iterable<int> setIds) {
+    if (setIds.contains(state?.setId)) state = null;
+  }
+}
+
+final setStopwatchProvider =
+    NotifierProvider<SetStopwatch, ({int setId, DateTime startedAt})?>(
+      SetStopwatch.new,
+    );
 
 class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   WorkoutEditor(this.workoutId);
@@ -576,6 +667,18 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     _edit(exerciseId, s.copyWith(reps: Value(reps)));
   }
 
+  void setDuration(int exerciseId, int setId, int? seconds) {
+    final s = _set(exerciseId, setId);
+    if (s == null || s.durationSeconds == seconds) return;
+    _edit(exerciseId, s.copyWith(durationSeconds: Value(seconds)));
+  }
+
+  void setDistance(int exerciseId, int setId, double? metres) {
+    final s = _set(exerciseId, setId);
+    if (s == null || s.distanceM == metres) return;
+    _edit(exerciseId, s.copyWith(distanceM: Value(metres)));
+  }
+
   void _edit(int exerciseId, WorkoutSet updated) {
     _replaceSet(exerciseId, updated);
     _dirty[updated.id] = updated;
@@ -608,7 +711,8 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     flush();
   }
 
-  /// Toggles completion. When completing, empty fields take their hints.
+  /// Toggles completion. When completing, empty fields take their hints as
+  /// [DraftExercise.completion] says.
   CompleteResult toggleDone(int exerciseId, int setId) {
     final ex = _draft.byId(exerciseId);
     final s = _set(exerciseId, setId);
@@ -623,19 +727,9 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     }
 
     final index = ex.sets.indexOf(s);
-    final hint = ex.hintFor(index);
-    final reps = s.reps ?? hint.reps;
-    double? load = ex.hasLoad ? (s.loadKg ?? hint.load) : null;
-    if (reps == null || reps <= 0) return CompleteResult.needsReps;
-    if (ex.type == TrackingType.weights && load == null) {
-      return CompleteResult.needsWeight;
-    }
-    if (ex.type == TrackingType.bodyweight && ex.mode != LoadMode.none) {
-      load ??= 0;
-    }
-    final u = s.copyWith(
-      loadKg: Value(load),
-      reps: Value(reps),
+    final c = ex.completion(index);
+    if (c.result != CompleteResult.ok) return c.result;
+    final u = c.set.copyWith(
       isCompleted: true,
       completedAt: Value(DateTime.now()),
     );
@@ -700,6 +794,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     final index = ex?.sets.indexWhere((s) => s.id == setId) ?? -1;
     if (ex == null || index < 0) return Future.value();
     unawaited(commitDelete());
+    ref.read(setStopwatchProvider.notifier).cancel([setId]);
     final p = (
       exerciseId: exerciseId,
       index: index,
@@ -787,8 +882,9 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
 
   /// Swaps the exercise of a card and keeps its place, superset, note, rest
   /// and sets. Hints, previous sets and bests come from [e]. Loads carry over
-  /// when both exercises track load the same way. Otherwise they are cleared,
-  /// and a completed set that now lacks a required weight is reopened.
+  /// when both exercises track load the same way. Otherwise they are cleared
+  /// along with what [e] doesn't record (reps, time or distance), and a
+  /// completed set that now lacks what [e] needs is reopened.
   /// Returns whether loads were cleared.
   Future<bool> replaceExercise(int exerciseId, Exercise e) async {
     await commitDelete();
@@ -815,15 +911,30 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
         old.type == e.trackingType && (weights || old.mode == e.loadMode);
     var changed = false;
     WorkoutSet cleared(WorkoutSet s) {
-      final done = s.isCompleted && !weights;
+      final type = e.trackingType;
+      final reps = type.hasReps ? s.reps : null;
+      final seconds = type.hasReps ? null : s.durationSeconds;
+      final metres = type == TrackingType.distance ? s.distanceM : null;
+      final done =
+          s.isCompleted &&
+          switch (type) {
+            TrackingType.weights => false,
+            TrackingType.bodyweight => (reps ?? 0) > 0,
+            TrackingType.duration => (seconds ?? 0) > 0,
+            TrackingType.distance => (metres ?? 0) > 0,
+          };
       final load = done && e.loadMode != LoadMode.none ? 0.0 : null;
-      if (s.loadKg == load && s.isCompleted == done) return s;
-      changed = changed || s.loadKg != load;
-      return _dirty[s.id] = s.copyWith(
+      final u = s.copyWith(
         loadKg: Value(load),
+        reps: Value(reps),
+        durationSeconds: Value(seconds),
+        distanceM: Value(metres),
         isCompleted: done,
         completedAt: Value(done ? s.completedAt : null),
       );
+      if (u == s) return s;
+      changed = changed || s.loadKg != load;
+      return _dirty[s.id] = u;
     }
 
     _replaceExercise(
@@ -1015,8 +1126,8 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   }
 
   /// Completes every unchecked set the way ✓ does, filling empty fields from
-  /// hints. Sets with no reps or weight to use stay unchecked and are counted
-  /// in `skipped`. Marked sets get no time, and no rest starts.
+  /// hints. Sets with nothing to use for a field they need stay unchecked and
+  /// are counted in `skipped`. Marked sets get no time, and no rest starts.
   ({int marked, int skipped}) markAllDone() {
     var marked = 0;
     var skipped = 0;
@@ -1030,11 +1141,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
           skipped++;
           continue;
         }
-        final u = s.copyWith(
-          loadKg: Value(c.load),
-          reps: Value(c.reps),
-          isCompleted: true,
-        );
+        final u = c.set.copyWith(isCompleted: true);
         _replaceSet(id, u);
         _dirty[u.id] = u;
         marked++;
@@ -1050,6 +1157,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
   /// Returns false if nothing was logged (the workout is removed).
   Future<bool> finish({DateTime? endedAt}) async {
     _debounce?.cancel();
+    _cancelStopwatch();
     await commitDelete();
     await _writeDirty();
     final d = _draft;
@@ -1070,6 +1178,7 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
 
   Future<void> discard() async {
     _debounce?.cancel();
+    _cancelStopwatch();
     await commitDelete();
     _dirty.clear();
     final live = state.value?.isLive ?? true;
@@ -1078,6 +1187,12 @@ class WorkoutEditor extends AsyncNotifier<WorkoutDraft> {
     if (live) ref.read(restTimerProvider.notifier).skip();
     _release();
   }
+
+  /// A set still being timed in this workout is not stored.
+  void _cancelStopwatch() => ref.read(setStopwatchProvider.notifier).cancel([
+    for (final e in state.value?.exercises ?? const <DraftExercise>[])
+      for (final s in e.sets) s.id,
+  ]);
 
   void _release() {
     _keepAlive?.close();

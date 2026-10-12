@@ -29,6 +29,8 @@ class SetList extends StatelessWidget {
     mode: exercise.loadMode,
     loadKg: s.loadKg,
     reps: s.reps,
+    durationSeconds: s.durationSeconds,
+    distanceM: s.distanceM,
     unit: unit,
   );
 

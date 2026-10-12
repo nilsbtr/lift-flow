@@ -561,25 +561,27 @@ class _ItemCardState extends State<_ItemCard> {
                   ),
                 ],
               ),
-              Padding(
-                padding: const EdgeInsets.only(right: Space.md),
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: Space.xs,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: Space.xs),
-                      child: Text(
-                        'Reps',
-                        style: t.bodyMedium?.copyWith(color: muted),
+              // Time and distance exercises have no rep target.
+              if (item.exercise.trackingType.hasReps)
+                Padding(
+                  padding: const EdgeInsets.only(right: Space.md),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: Space.xs,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: Space.xs),
+                        child: Text(
+                          'Reps',
+                          style: t.bodyMedium?.copyWith(color: muted),
+                        ),
                       ),
-                    ),
-                    _repsField('Min', _min),
-                    Text('–', style: t.bodyMedium),
-                    _repsField('Max', _max),
-                  ],
+                      _repsField('Min', _min),
+                      Text('–', style: t.bodyMedium),
+                      _repsField('Max', _max),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           if (_repsError != null)

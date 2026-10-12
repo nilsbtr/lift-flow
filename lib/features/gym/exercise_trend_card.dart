@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
 import '../../data/workout_repository.dart';
+import '../../domain/records.dart';
 import '../../domain/stats.dart';
 import '../../domain/units.dart';
 import '../../theme/app_theme.dart';
@@ -68,7 +69,8 @@ class _ExerciseChartsState extends State<ExerciseCharts> {
     final latest = shown.isEmpty ? series.last : shown.last;
     final best = series.map((p) => p.value).reduce((a, b) => a > b ? a : b);
 
-    String fmt(double v) => fmtMetric(metric, v, unit);
+    final mode = e.loadMode;
+    String fmt(double v) => fmtMetric(metric, v, unit, mode: mode);
 
     final (headline, sub) = switch (selected) {
       final p? => (
@@ -77,14 +79,13 @@ class _ExerciseChartsState extends State<ExerciseCharts> {
       ),
       null when shown.length >= 2 => (
         fmt(latest.value),
-        '${fmtMetricDelta(metric, shown.last.value - shown.first.value, unit)} '
+        '${fmtMetricDelta(metric, shown.last.value - shown.first.value, unit, mode: mode)} '
             'since ${_short.format(shown.first.date)}',
       ),
       null => (fmt(latest.value), _day.format(latest.date)),
     };
 
-    final scatter = e.trackingType == TrackingType.weights ||
-            e.loadMode != LoadMode.none
+    final scatter = hasRepMaxes(e.trackingType, e.loadMode)
         ? [
             for (final f in facts)
               if ((f.reps ?? 0) > 0 &&
@@ -142,11 +143,12 @@ class _ExerciseChartsState extends State<ExerciseCharts> {
                     for (final p in shown)
                       TrendPoint(
                         p.date,
-                        metricDisplay(metric, p.value, unit),
-                        best: metricDisplay(metric, p.best, unit),
+                        metricDisplay(metric, p.value, unit, mode: mode),
+                        best: metricDisplay(metric, p.best, unit, mode: mode),
                         isRecord: p.isRecord,
                       ),
                   ],
+                  yLabel: (v) => fmtMetricAxis(metric, v, unit, mode: mode),
                   semanticLabel:
                       '${metric.label}, ${shown.length} sessions. '
                       'Latest ${fmt(latest.value)}, best ${fmt(best)}.',

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:collection/collection.dart';
 
 import '../data/enums.dart';
@@ -18,6 +20,7 @@ double? effectiveLoad({
 
 /// Volume of one set in kg. [perDumbbell] counts the entered load twice and
 /// [perSide] the reps. Records and e1RM use the entered values instead.
+/// Time and distance sets have no volume.
 double setVolume({
   required TrackingType type,
   required double? loadKg,
@@ -26,7 +29,7 @@ double setVolume({
   bool perSide = false,
   bool perDumbbell = false,
 }) {
-  if (reps == null || reps <= 0) return 0;
+  if (!type.hasReps || reps == null || reps <= 0) return 0;
   final eff = effectiveLoad(
     type: type,
     loadKg: perDumbbell && loadKg != null && loadKg > 0 ? loadKg * 2 : loadKg,
@@ -47,7 +50,12 @@ enum PrKind {
   heaviest('Heaviest'),
   e1rm('Best e1RM'),
   bestLoad('Best load'),
-  mostReps('Most reps');
+  mostReps('Most reps'),
+  longestTime('Longest time'),
+  longestDistance('Longest distance'),
+
+  /// Faster than every earlier set over that distance or more.
+  bestPace('Best pace');
 
   const PrKind(this.label);
   final String label;
@@ -64,6 +72,8 @@ class SetFact {
     required this.loadKg,
     required this.reps,
     required this.bodyweightKg,
+    this.durationSeconds,
+    this.distanceM,
     this.muscleGroup = MuscleGroup.other,
     this.secondaryMuscles = const [],
     this.perSide = false,
@@ -78,10 +88,26 @@ class SetFact {
   final double? loadKg;
   final int? reps;
   final double? bodyweightKg;
+  final int? durationSeconds;
+  final double? distanceM;
   final MuscleGroup muscleGroup;
   final List<MuscleGroup> secondaryMuscles;
   final bool perSide;
   final bool perDumbbell;
+
+  /// Whether the set holds what its type records: reps, a time or a distance.
+  bool get isLogged => switch (type) {
+    TrackingType.duration => (durationSeconds ?? 0) > 0,
+    TrackingType.distance => (distanceM ?? 0) > 0,
+    _ => (reps ?? 0) > 0,
+  };
+
+  /// Average speed in m/s of a distance set with a time.
+  double? get speed {
+    final d = distanceM ?? 0;
+    final t = durationSeconds ?? 0;
+    return type == TrackingType.distance && d > 0 && t > 0 ? d / t : null;
+  }
 
   double get volume => setVolume(
     type: type,
@@ -100,7 +126,57 @@ class ExerciseBests {
   double? bestLoad;
   int? mostReps;
 
+  /// Seconds.
+  int? longestTime;
+
+  /// Metres.
+  double? longestDistance;
+
+  /// Speeds in m/s by distance, without the sets a longer one was as fast as.
+  final List<({double distanceM, double speed})> _paces = [];
+
+  /// A set this much shorter still counts as covering a distance.
+  static const _paceSlack = 0.02;
+
+  /// The fastest speed in m/s over [distanceM] or more.
+  double? paceOver(double distanceM) => _paces
+      .where((p) => p.distanceM >= distanceM * (1 - _paceSlack))
+      .map((p) => p.speed)
+      .maxOrNull;
+
+  /// The fastest speed in m/s over any distance.
+  double? get bestPace => paceOver(0);
+
+  /// The speed a set over [distanceM] has to beat: the fastest over that
+  /// distance or more, or that of the longest set when none went as far.
+  double? _paceToBeat(double distanceM) =>
+      paceOver(distanceM) ?? maxBy(_paces, (p) => p.distanceM)?.speed;
+
+  void _addTimed(SetFact f) {
+    if (!f.isLogged) return;
+    final load = f.loadKg ?? 0;
+    if (f.mode != LoadMode.none && load > 0) heaviest = _max(heaviest, load);
+    if (f.type == TrackingType.duration) {
+      longestTime = math.max(longestTime ?? 0, f.durationSeconds!);
+      return;
+    }
+    final d = f.distanceM!;
+    longestDistance = _max(longestDistance, d);
+    final speed = f.speed;
+    if (speed == null ||
+        _paces.any((p) => p.distanceM >= d && p.speed >= speed)) {
+      return;
+    }
+    _paces
+      ..removeWhere((p) => p.distanceM <= d && p.speed <= speed)
+      ..add((distanceM: d, speed: speed));
+  }
+
   void add(SetFact f) {
+    if (!f.type.hasReps) {
+      _addTimed(f);
+      return;
+    }
     final reps = f.reps;
     if (reps == null || reps <= 0) return;
     if (f.type == TrackingType.weights) {
@@ -132,24 +208,47 @@ class ExerciseBests {
     PrKind.e1rm => e1rm,
     PrKind.bestLoad => bestLoad,
     PrKind.mostReps => mostReps?.toDouble(),
+    PrKind.longestTime => longestTime?.toDouble(),
+    PrKind.longestDistance => longestDistance,
+    PrKind.bestPace => bestPace,
   };
 
   /// Kinds in which [f] beats these bests. A kind with no best can't be beaten.
-  Set<PrKind> beatenBy(SetFact f) {
-    final now = ExerciseBests()..add(f);
-    return {
-      for (final k in PrKind.values)
-        if ((now.valueOf(k), valueOf(k)) case (final a?, final b?)
-            when a > b + _eps)
-          k,
-    };
+  Set<PrKind> beatenBy(SetFact f) =>
+      (ExerciseBests()..add(f)).beats(this).keys.toSet();
+
+  /// Kinds in which these bests beat [prev], with the new best. A pace is
+  /// measured against [prev] over the same distance or more, and against its
+  /// longest set when going further than ever.
+  Map<PrKind, double> beats(ExerciseBests prev) {
+    final out = <PrKind, double>{};
+    for (final k in PrKind.values) {
+      if (k == PrKind.bestPace) {
+        final fastest = _paces
+            .where((p) {
+              final b = prev._paceToBeat(p.distanceM);
+              return b != null && p.speed > b + _eps;
+            })
+            .map((p) => p.speed)
+            .maxOrNull;
+        if (fastest != null) out[k] = fastest;
+        continue;
+      }
+      final a = valueOf(k);
+      final b = prev.valueOf(k);
+      if (a != null && b != null && a > b + _eps) out[k] = a;
+    }
+    return out;
   }
 
   ExerciseBests copy() => ExerciseBests()
     ..heaviest = heaviest
     ..e1rm = e1rm
     ..bestLoad = bestLoad
-    ..mostReps = mostReps;
+    ..mostReps = mostReps
+    ..longestTime = longestTime
+    ..longestDistance = longestDistance
+    .._paces.addAll(_paces);
 
   static double _max(double? a, double b) => a == null || b > a ? b : a;
 }
@@ -166,7 +265,7 @@ class RepMax {
 /// Whether a table of best loads per rep count says anything for [mode].
 /// Bodyweight-only sets all carry the same load.
 bool hasRepMaxes(TrackingType type, LoadMode mode) =>
-    type == TrackingType.weights || mode != LoadMode.none;
+    type == TrackingType.weights || (type.hasReps && mode != LoadMode.none);
 
 /// Best load at each exact rep count from 1 to [maxReps], by reps. [facts] are
 /// working sets (warm-ups are left out when building them). Loads are the
@@ -254,21 +353,10 @@ Map<int, Set<PrKind>> computePrs(List<SetFact> facts, int workoutId) {
   current.forEach((exerciseId, now) {
     final prev = before[exerciseId];
     if (prev == null) return;
-    final beaten = _beaten(now, prev);
+    final beaten = now.beats(prev);
     if (beaten.isNotEmpty) result[exerciseId] = beaten.keys.toSet();
   });
   return result;
-}
-
-/// Kinds in which [now] beats [prev], with the new best.
-Map<PrKind, double> _beaten(ExerciseBests now, ExerciseBests prev) {
-  final out = <PrKind, double>{};
-  for (final k in PrKind.values) {
-    final a = now.valueOf(k);
-    final b = prev.valueOf(k);
-    if (a != null && b != null && a > b + _eps) out[k] = a;
-  }
-  return out;
 }
 
 /// An exercise that set at least one PR in a workout.
@@ -303,7 +391,7 @@ List<PrEvent> prHistory(Iterable<SetFact> facts) {
       session.forEach(now.add);
       final prev = before;
       if (prev != null) {
-        final beaten = _beaten(now, prev);
+        final beaten = now.beats(prev);
         if (beaten.isNotEmpty) {
           events.add(
             PrEvent(

@@ -244,6 +244,8 @@ class WorkoutRepository {
       loadKg: s.loadKg,
       reps: s.reps,
       bodyweightKg: w.bodyweightKg,
+      durationSeconds: s.durationSeconds,
+      distanceM: s.distanceM,
       muscleGroup: e.muscleGroup,
       secondaryMuscles: e.secondaryMuscles,
       perSide: e.perSide,

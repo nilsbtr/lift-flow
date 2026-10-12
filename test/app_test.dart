@@ -1667,7 +1667,7 @@ void main() {
       final backup = BackupService(db);
       final bytes = await backup.export();
       final json = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
-      expect(json['version'], 3);
+      expect(json['version'], 4);
       expect(json.containsKey('progressPhotos'), isFalse);
       final exported = json['settings']! as Map<String, Object?>;
       for (final k in [

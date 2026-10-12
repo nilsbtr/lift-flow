@@ -443,8 +443,10 @@ class _TemplatePreviewSheet extends StatelessWidget {
         children: [
           Expanded(child: Text(it.exercise.name, style: t.bodyLarge)),
           Text(
-            '${it.targetSets} $kTimes '
-            '${it.repsMin == null ? '–' : fmtRepsRange(it.repsMin, it.repsMax)}',
+            !it.exercise.trackingType.hasReps
+                ? '${it.targetSets} ${it.targetSets == 1 ? 'set' : 'sets'}'
+                : '${it.targetSets} $kTimes '
+                      '${it.repsMin == null ? '–' : fmtRepsRange(it.repsMin, it.repsMax)}',
             style: t.bodyMedium?.copyWith(color: lift.muted),
           ),
         ],

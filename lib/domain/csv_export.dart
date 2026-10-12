@@ -13,8 +13,8 @@ typedef CsvSource = ({
 });
 
 /// Weight comes twice: always in kg, and in the user's [unit] with its name.
-/// RPE is RPE whatever the effort setting is. Duration and distance are empty
-/// until timed and distance exercises exist.
+/// RPE is RPE whatever the effort setting is. Duration is in seconds and
+/// distance in metres, whatever unit the exercise is logged in.
 const kCsvHeader = [
   'date',
   'start',

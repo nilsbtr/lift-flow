@@ -83,6 +83,8 @@ double? matchScore(Exercise e, String query) {
   final other = [
     ..._tokens(e.equipment.label),
     if (e.trackingType == TrackingType.bodyweight) 'bodyweight',
+    if (e.trackingType == TrackingType.duration) 'time',
+    if (e.trackingType == TrackingType.distance) 'distance',
     ..._tokens(e.muscleGroup.label),
     for (final g in e.secondaryMuscles) ..._tokens(g.label),
   ];

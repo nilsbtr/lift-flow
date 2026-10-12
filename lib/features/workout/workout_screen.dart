@@ -673,7 +673,9 @@ class _ExerciseCardState extends ConsumerState<_ExerciseCard> {
     final lift = LiftColors.of(context);
     final scheme = Theme.of(context).colorScheme;
     final editor = ref.read(provider.notifier);
-    final target = fmtRepsRange(ex.repsMin, ex.repsMax);
+    final target = ex.type.hasReps
+        ? fmtRepsRange(ex.repsMin, ex.repsMax)
+        : '';
     final (barKg, plates) = ref.watch(
       settingsProvider.select((s) => (s.barWeightKg, s.plates)),
     );
@@ -979,6 +981,8 @@ class _DoneSummary extends StatelessWidget {
           mode: exercise.mode,
           loadKg: s.loadKg,
           reps: s.reps,
+          durationSeconds: s.durationSeconds,
+          distanceM: s.distanceM,
           unit: unit,
         ),
     ].join(', ');
