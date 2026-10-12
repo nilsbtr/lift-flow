@@ -14,11 +14,13 @@ import 'data/settings_repository.dart';
 import 'data/template_repository.dart';
 import 'data/workout_repository.dart';
 import 'domain/exercise_search.dart';
+import 'domain/home_widget.dart';
 import 'domain/records.dart';
 import 'domain/rest.dart';
 import 'domain/shortcuts.dart';
 import 'domain/stats.dart';
 import 'services/app_lock.dart';
+import 'services/home_widget.dart';
 import 'services/notifications.dart';
 import 'services/shortcuts.dart';
 import 'theme/dynamic_colors.dart';
@@ -507,3 +509,32 @@ final restTimerProvider =
     NotifierProvider<RestTimerController, RestTimerState?>(
       RestTimerController.new,
     );
+
+// ------------------------------------------------------------ home widget
+
+final homeWidgetProvider = Provider<HomeWidgetService>((ref) {
+  final service = HomeWidgetService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+/// What the home-screen widget shows; null until the data has loaded, so a
+/// start doesn't blank the widget first.
+final homeWidgetSnapshotProvider = Provider<HomeWidgetSnapshot?>((ref) {
+  final templates = ref.watch(templatesProvider).value;
+  final folders = ref.watch(templateFoldersProvider).value;
+  final history = ref.watch(historyProvider).value;
+  if (templates == null || folders == null || history == null) return null;
+  final live = ref.watch(liveWorkoutProvider);
+  return widgetSnapshot(
+    history: history,
+    firstDay: ref.watch(settingsProvider.select((s) => s.firstDayOfWeek)),
+    now: DateTime.now(),
+    next: nextTemplate(
+      [for (final d in templates) d.template],
+      folders,
+      [?live, ...history],
+    ),
+    live: live,
+  );
+});

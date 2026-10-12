@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'data/database.dart';
+import 'domain/home_widget.dart';
 import 'features/lock/lock_gate.dart';
 import 'features/workout/workout_actions.dart';
 import 'providers.dart';
@@ -52,6 +53,12 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
       (_, templates) => unawaited(ref.read(shortcutsProvider).sync(templates)),
       fireImmediately: true,
     );
+    unawaited(ref.read(homeWidgetProvider).init(_onWidgetTap));
+    ref.listenManual(homeWidgetSnapshotProvider, (_, snapshot) {
+      if (snapshot != null) {
+        unawaited(ref.read(homeWidgetProvider).sync(snapshot));
+      }
+    }, fireImmediately: true);
     ref.listenManual(
       settingsProvider.select((s) => s.appLock),
       (_, on) => unawaited(setRecentsHidden(on)),
@@ -63,13 +70,30 @@ class _LiftFlowAppState extends ConsumerState<LiftFlowApp> {
       .read(appLockProvider.notifier)
       .whenUnlocked(() => unawaited(_startTemplate(templateId)));
 
-  /// Starts a template from a launcher shortcut, or opens Home if it's gone.
-  Future<void> _startTemplate(int templateId) async {
-    final template = await ref.read(templateRepoProvider).get(templateId);
-    if (!mounted) return;
-    if (template == null) {
-      ref.read(routerProvider).go('/');
-      return;
+  /// A tap on the home-screen widget. Open only brings the app to the front.
+  void _onWidgetTap(WidgetAction action) =>
+      ref.read(appLockProvider.notifier).whenUnlocked(() {
+        switch (action.tap) {
+          case WidgetTap.start:
+            unawaited(_startTemplate(action.templateId));
+          case WidgetTap.resume:
+            if (ref.read(liveWorkoutProvider) != null) {
+              ref.read(routerProvider).go('/workout');
+            }
+          case WidgetTap.open:
+        }
+      });
+
+  /// Starts a template (or an empty workout) from a launcher shortcut or the
+  /// widget, or opens Home if the template is gone.
+  Future<void> _startTemplate(int? templateId) async {
+    if (templateId != null) {
+      final template = await ref.read(templateRepoProvider).get(templateId);
+      if (!mounted) return;
+      if (template == null) {
+        ref.read(routerProvider).go('/');
+        return;
+      }
     }
     // A cold start can get here before the first frame has built the navigator.
     if (rootNavigatorKey.currentContext == null) {
