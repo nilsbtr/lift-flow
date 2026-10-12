@@ -10,6 +10,7 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 - **Exercises**: weights, bodyweight, time (planks, holds) or distance (runs, rows, carries), filed under a muscle group (required, with optional secondary muscles), with equipment and per-side or per-dumbbell loads that count in volume. The picker lists recent and frequent exercises first and matches loosely (“db bench”). The exercise page shows a rep-max table and links each session to its workout. Bodyweight exercises can track added or assisted load. Time and distance exercises can carry a weight; distance is logged in km or mi, or in m or yd with a weight, and time sets have a stopwatch. An exercise that has logged sets is archived instead of deleted.
 - **App lock**: optional. Unlocks with the phone’s own fingerprint, face, PIN, pattern or password, on a cold start and after 5 minutes in the background. The app is hidden while locked, and from the recents list on Android 13+ (older versions block screenshots instead).
 - **App shortcuts**: long-press the app icon to start one of your four most recently used templates.
+- **Home-screen widget** (Android): this week’s training days and a button that starts your next template, or continues the running workout.
 - **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps, longest time, longest distance, best pace).
 - **Progress**: consistency calendar, weekly training (3M to All), muscle balance with a configurable weekly-sets band, top lifts, recent records, lifetime totals with a year in review, and body weight with a 7-day average. Weigh-ins can be backdated, edited, and undone after a delete.
 - **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, Material You colors (Android 12+), rest defaults, set effort (RPE or RIR), bar weight and available plates, keep screen on, and JSON backup export/import with the date of the last backup.
@@ -18,14 +19,14 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 
 ## Tech stack
 
-| Concern     | Package                                                                                                          |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| UI          | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                             |
-| State       | `flutter_riverpod` 3                                                                                             |
-| Routing     | `go_router` (`StatefulShellRoute` with 4 tabs)                                                                   |
-| Persistence | `drift` + `drift_flutter` (SQLite, WAL)                                                                          |
-| Icons       | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                    |
-| Platform    | `flutter_local_notifications`, `flutter_timezone`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions` |
+| Concern     | Package                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| UI          | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                                            |
+| State       | `flutter_riverpod` 3                                                                                                            |
+| Routing     | `go_router` (`StatefulShellRoute` with 4 tabs)                                                                                  |
+| Persistence | `drift` + `drift_flutter` (SQLite, WAL)                                                                                         |
+| Icons       | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                                   |
+| Platform    | `flutter_local_notifications`, `flutter_timezone`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions`, `home_widget` |
 
 ## Getting started
 
@@ -55,9 +56,9 @@ lib/
   router.dart      routes, bottom navigation shell, live workout bar
   providers.dart   Riverpod providers (repositories, streams, settings, rest timer)
   data/            drift schema, enums, repositories, backup service
-  domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats, plate math, warm-ups, supersets
+  domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats, plate math, warm-ups, supersets, the widget’s next template
   features/        screens by tab: home, history, gym, workout, settings, and the lock screen
-  services/        local notifications, device authentication, launcher shortcuts
+  services/        local notifications, device authentication, launcher shortcuts, home-screen widget
   theme/           colors, text theme, spacing/radius/motion tokens, icons
   widgets/         shared widgets (sheets, dialogs, cards, PeriodicBuilder)
 assets/
