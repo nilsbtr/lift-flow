@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lift_flow/data/database.dart';
 import 'package:lift_flow/data/exercise_repository.dart';
+import 'package:lift_flow/data/photo_storage.dart';
 import 'package:lift_flow/data/settings_repository.dart';
 import 'package:lift_flow/data/workout_repository.dart';
 import 'package:lift_flow/features/gym/exercise_detail_screen.dart';
@@ -36,9 +39,16 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   late AppDatabase db;
   late GoRouter router;
+  late Directory photoDir;
 
-  setUp(() => db = AppDatabase(NativeDatabase.memory()));
-  tearDown(() => db.close());
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+    photoDir = Directory.systemTemp.createTempSync('lift_flow_tablet_');
+  });
+  tearDown(() async {
+    await db.close();
+    if (photoDir.existsSync()) photoDir.deleteSync(recursive: true);
+  });
 
   void resize(WidgetTester tester, Size size) {
     tester.view.physicalSize = size;
@@ -106,6 +116,7 @@ void main() {
         databaseProvider.overrideWithValue(db),
         initialSettingsProvider.overrideWithValue(settings),
         notificationsProvider.overrideWithValue(_NoNotifications()),
+        photoStorageProvider.overrideWithValue(PhotoStorage.at(photoDir)),
       ],
     );
     addTearDown(container.dispose);
@@ -488,6 +499,8 @@ void main() {
             '/history/1/exercise/1',
             '/progress',
             '/progress/workout/2',
+            '/progress/photos',
+            '/progress/photos/compare',
             '/gym',
             '/gym/exercise/2',
             '/gym/exercise/2/workout/2',
