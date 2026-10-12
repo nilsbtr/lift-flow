@@ -18,8 +18,11 @@ enum GymTab { exercises, templates }
 /// The segment lives in the URL (`/gym?tab=templates`) so links and the
 /// restored tab stack land on the right list.
 class GymScreen extends ConsumerWidget {
-  const GymScreen({super.key, this.tab = GymTab.exercises});
+  const GymScreen({super.key, this.tab = GymTab.exercises, this.selectedId});
   final GymTab tab;
+
+  /// The exercise open in the detail pane beside the list, if any.
+  final int? selectedId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -44,11 +47,11 @@ class GymScreen extends ConsumerWidget {
                 segments: const [
                   ButtonSegment(
                     value: GymTab.exercises,
-                    label: Text('Exercises'),
+                    label: _SegmentLabel('Exercises'),
                   ),
                   ButtonSegment(
                     value: GymTab.templates,
-                    label: Text('Templates'),
+                    label: _SegmentLabel('Templates'),
                   ),
                 ],
                 selected: {tab},
@@ -65,7 +68,7 @@ class GymScreen extends ConsumerWidget {
         children: [
           TickerMode(
             enabled: tab == GymTab.exercises,
-            child: const _ExerciseList(),
+            child: _ExerciseList(selectedId: selectedId),
           ),
           TickerMode(
             enabled: tab == GymTab.templates,
@@ -87,8 +90,19 @@ class GymScreen extends ConsumerWidget {
   }
 }
 
+/// Shrinks instead of wrapping: the app bar has no room for a second line.
+class _SegmentLabel extends StatelessWidget {
+  const _SegmentLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) =>
+      FittedBox(fit: BoxFit.scaleDown, child: Text(text, softWrap: false));
+}
+
 class _ExerciseList extends ConsumerWidget {
-  const _ExerciseList();
+  const _ExerciseList({this.selectedId});
+  final int? selectedId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -122,7 +136,8 @@ class _ExerciseList extends ConsumerWidget {
         ..add(g)
         ..addAll(items);
     }
-    rows.add(const _ArchivedLink());
+    rows.add(_ArchivedLink(selectedId: selectedId));
+    final scheme = Theme.of(context).colorScheme;
 
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 96),
@@ -136,6 +151,9 @@ class _ExerciseList extends ConsumerWidget {
             title: Text(r.name),
             subtitle: Text(exerciseSubtitle(r)),
             trailing: const AppIcon(AppIcons.chevronRight),
+            selected: r.id == selectedId,
+            selectedColor: scheme.onSurface,
+            selectedTileColor: scheme.primaryContainer,
             onTap: () => context.go('/gym/exercise/${r.id}'),
           );
         }
@@ -146,7 +164,8 @@ class _ExerciseList extends ConsumerWidget {
 }
 
 class _ArchivedLink extends ConsumerWidget {
-  const _ArchivedLink();
+  const _ArchivedLink({this.selectedId});
+  final int? selectedId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -170,6 +189,8 @@ class _ArchivedLink extends ConsumerWidget {
                     ref.read(exerciseRepoProvider).setArchived(e.id, false),
                 child: const Text('Restore'),
               ),
+              selected: e.id == selectedId,
+              selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
               onTap: () => context.go('/gym/exercise/${e.id}'),
             ),
         ],
