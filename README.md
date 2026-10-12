@@ -11,6 +11,7 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 - **App lock**: optional. Unlocks with the phone’s own fingerprint, face, PIN, pattern or password, on a cold start and after 5 minutes in the background. The app is hidden while locked, and from the recents list on Android 13+ (older versions block screenshots instead).
 - **App shortcuts**: long-press the app icon to start one of your four most recently used templates.
 - **Home-screen widget** (Android): this week’s training days and a button that starts your next template, or continues the running workout.
+- **Tablets and landscape**: from 600 dp wide the tabs move to a side rail, and from 840 dp History and the exercise list show the selected workout or exercise beside the list. Other screens keep a readable column width.
 - **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps, longest time, longest distance, best pace).
 - **Progress**: consistency calendar, weekly training (3M to All), muscle balance with a configurable weekly-sets band, top lifts, recent records, lifetime totals with a year in review, and body weight with a 7-day average. Weigh-ins can be backdated, edited, and undone after a delete.
 - **Progress photos**: add photos from the camera or gallery, browse them by month, edit the date and note, and compare any two side by side. They are kept in the app’s private storage (downscaled to 1600 px), never in the gallery.
@@ -24,7 +25,7 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | UI            | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                                                            |
 | State         | `flutter_riverpod` 3                                                                                                                            |
-| Routing       | `go_router` (`StatefulShellRoute` with 4 tabs)                                                                                                  |
+| Routing       | `go_router` (`StatefulShellRoute` with 5 tabs)                                                                                                  |
 | Persistence   | `drift` + `drift_flutter` (SQLite, WAL)                                                                                                         |
 | Photo archive | `archive` (zip)                                                                                                                                 |
 | Icons         | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                                                   |
@@ -55,14 +56,14 @@ dart run flutter_launcher_icons  # regenerate launcher icons from assets/icon/
 lib/
   main.dart        startup: open DB, preload settings/live workout/rest/icons, runApp
   app.dart         MaterialApp, theme mode, wakelock, background notifications
-  router.dart      routes, bottom navigation shell, live workout bar
+  router.dart      routes, navigation shell (bottom bar or rail), list-detail panes, live workout bar
   providers.dart   Riverpod providers (repositories, streams, settings, rest timer)
   data/            drift schema, enums, repositories, backup service, photo storage
   domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats, plate math, warm-ups, supersets, the widget’s next template
   features/        screens by tab: home, history, gym, workout, settings, plus photos and the lock screen
   services/        local notifications, device authentication, launcher shortcuts, home-screen widget, photo picker
   theme/           colors, text theme, spacing/radius/motion tokens, icons
-  widgets/         shared widgets (sheets, dialogs, cards, PeriodicBuilder)
+  widgets/         shared widgets (sheets, dialogs, cards, PeriodicBuilder, adaptive layout)
 assets/
   icons/           SVG icons (14×14 grid)
   fonts/           Quicksand (display), Nunito Sans (body)
