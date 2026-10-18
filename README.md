@@ -50,6 +50,32 @@ flutter build bundle             # catches kernel compile errors without an Andr
 dart run flutter_launcher_icons  # regenerate launcher icons from assets/icon/
 ```
 
+## CI and testing builds
+
+GitHub Actions (`.github/workflows/`):
+
+- **CI** (`ci.yml`) runs `flutter analyze`, `flutter test` and `flutter build bundle` on every pull request.
+- **Release** (`release.yml`) runs CI on every push to `main` (or by hand from the Actions tab), then builds a signed release APK and publishes it as a pre-release named `build-<run number>`, with the merged changes as notes. The run number is the version code, so each build installs over the previous one.
+
+Release builds need a signing key that never changes: Android refuses to update an app signed with a different key, and uninstalling deletes its data. Create one once and keep a copy somewhere safe:
+
+```sh
+keytool -genkeypair -v -keystore liftflow-release.jks -storetype PKCS12 \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias liftflow
+base64 -w0 liftflow-release.jks   # macOS: base64 -i liftflow-release.jks
+```
+
+Then add these repository secrets (Settings › Secrets and variables › Actions):
+
+| Secret                      | Value                                                |
+| --------------------------- | ---------------------------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`   | the base64 output                                    |
+| `ANDROID_KEYSTORE_PASSWORD` | the keystore password                                |
+| `ANDROID_KEY_ALIAS`         | `liftflow`                                           |
+| `ANDROID_KEY_PASSWORD`      | the key password (same as the keystore’s for PKCS12) |
+
+To build a signed APK locally, put the same values in `android/key.properties` (git-ignored): `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. Without that file, release builds use the debug key.
+
 ## Project layout
 
 ```
