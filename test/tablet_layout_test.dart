@@ -189,6 +189,19 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('history filters by exercise', (tester) async {
+    await pumpApp(tester, phone);
+    // Straight to History: nothing else has loaded the exercise lists yet.
+    await tap(tester, tab('History'));
+    await tap(tester, find.byTooltip('Search'));
+    await tap(tester, find.text('Exercise'));
+    expect(find.text('Bench press'), findsOneWidget);
+    await tap(tester, find.text('Squat'));
+    expect(find.text('Leg day'), findsOneWidget);
+    expect(find.text('Push day'), findsNothing);
+    await close(tester);
+  });
+
   testWidgets('a phone keeps the bottom bar and a single pane', (tester) async {
     await pumpApp(tester, phone);
     expect(find.byType(NavigationBar), findsOneWidget);
