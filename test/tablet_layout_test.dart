@@ -159,12 +159,20 @@ void main() {
     await settle(tester);
   }
 
-  Finder tab(String label) => find.descendant(
-    of: find.byWidgetPredicate(
-      (w) => w is NavigationBar || w is NavigationRail,
-    ),
-    matching: find.text(label),
-  );
+  /// A tab in the bar or rail. The bar slides unselected labels below its
+  /// edge, so there it is the whole destination.
+  Finder tab(String label) {
+    final destination = find.ancestor(
+      of: find.text(label),
+      matching: find.byType(NavigationDestination),
+    );
+    return destination.evaluate().isNotEmpty
+        ? destination
+        : find.descendant(
+            of: find.byType(NavigationRail),
+            matching: find.text(label),
+          );
+  }
 
   double left(WidgetTester tester, Type type) =>
       tester.getTopLeft(find.byType(type)).dx;
@@ -211,6 +219,23 @@ void main() {
     await tap(tester, tab('History'));
     expect(tester.getSize(find.byType(HistoryScreen)).width, phone.width);
     expect(find.byType(DetailPlaceholder), findsNothing);
+    // Only the selected tab shows its label; the others are faded out.
+    double opacity(String text) => tester
+        .widget<FadeTransition>(
+          find
+              .ancestor(
+                of: find.descendant(
+                  of: find.byType(NavigationBar),
+                  matching: find.text(text),
+                ),
+                matching: find.byType(FadeTransition),
+              )
+              .first,
+        )
+        .opacity
+        .value;
+    expect(opacity('History'), 1);
+    expect(opacity('Home'), 0);
 
     await tap(tester, find.text('Push day'));
     expect(location(), '/history/1');
