@@ -169,6 +169,26 @@ void main() {
   double left(WidgetTester tester, Type type) =>
       tester.getTopLeft(find.byType(type)).dx;
 
+  testWidgets('a tab screen makes room for the keyboard once', (tester) async {
+    await pumpApp(tester, phone);
+    await tap(tester, tab('History'));
+    await tap(tester, find.byTooltip('Search'));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 380);
+    await settle(tester);
+    // The list fills the space above the keyboard, and the search field,
+    // filters and rows can still be reached.
+    expect(
+      tester.getBottomLeft(find.byType(HistoryScreen)).dy,
+      phone.height - 380,
+    );
+    await tap(tester, find.text('Leg day'));
+    expect(location(), '/history/2');
+    await back(tester);
+    await tap(tester, find.text('Template'));
+    expect(find.text('Nothing to choose from yet.'), findsOneWidget);
+    await close(tester);
+  });
+
   testWidgets('a phone keeps the bottom bar and a single pane', (tester) async {
     await pumpApp(tester, phone);
     expect(find.byType(NavigationBar), findsOneWidget);

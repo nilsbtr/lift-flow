@@ -272,19 +272,24 @@ class AppShell extends StatelessWidget {
             // The rail has taken the left inset; without a bottom bar the
             // content has to clear the gesture bar itself.
             Expanded(
-              child: MediaQuery.removePadding(
-                context: context,
-                removeLeft: rail,
-                child: SafeArea(
-                  top: false,
-                  left: false,
-                  right: rail,
-                  bottom: rail,
-                  child: Column(
-                    children: [
-                      Expanded(child: shell),
-                      if (rail) const _LiveBar(),
-                    ],
+              // The body's own context: the Scaffold has already made room
+              // for the keyboard, and the tab screens' Scaffolds must not
+              // make room again, or their content is squeezed out of reach.
+              child: Builder(
+                builder: (context) => MediaQuery.removePadding(
+                  context: context,
+                  removeLeft: rail,
+                  child: SafeArea(
+                    top: false,
+                    left: false,
+                    right: rail,
+                    bottom: rail,
+                    child: Column(
+                      children: [
+                        Expanded(child: shell),
+                        if (rail) const _LiveBar(),
+                      ],
+                    ),
                   ),
                 ),
               ),

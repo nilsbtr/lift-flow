@@ -40,46 +40,52 @@ void main() {
         MaterialApp(
           theme: AppTheme.light(),
           home: Scaffold(
-            body: SingleChildScrollView(
-              child: MonthCalendar(
-                now: DateTime(2026, 10, 14),
-                firstDay: DateTime.sunday,
-                workouts: [
-                  workout(2, DateTime(2026, 10, 13, 18), 'Legs'),
-                  workout(1, DateTime(2026, 9, 30, 18), 'Push'),
-                ],
-                onTapDay: (d) => tapped = d,
-              ),
+            body: MonthCalendar(
+              now: DateTime(2026, 10, 14),
+              firstDay: DateTime.sunday,
+              workouts: [
+                workout(2, DateTime(2026, 10, 13, 18), 'Legs'),
+                workout(1, DateTime(2026, 8, 30, 18), 'Push'),
+              ],
+              onTapDay: (d) => tapped = d,
             ),
           ),
         ),
       );
       expect(tester.takeException(), isNull);
       expect(find.text('October 2026'), findsOneWidget);
-      expect(find.text('1 workout'), findsOneWidget);
+      expect(find.text('1 workout'), findsWidgets);
+      // No paging arrows: the months scroll.
+      expect(find.byType(IconButton), findsNothing);
       // Sunday first.
-      final labels = tester.widgetList<Text>(find.text('S')).length;
-      expect(labels, 2);
+      final october = find.ancestor(
+        of: find.text('October 2026'),
+        matching: find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_Month',
+        ),
+      );
+      Finder inOctober(String text) =>
+          find.descendant(of: october, matching: find.text(text));
+      expect(inOctober('S'), findsNWidgets(2));
       expect(
-        tester.getTopLeft(find.text('S').first).dx,
-        lessThan(tester.getTopLeft(find.text('M')).dx),
+        tester.getTopLeft(inOctober('S').first).dx,
+        lessThan(tester.getTopLeft(inOctober('M')).dx),
       );
 
-      await tester.tap(find.text('13'));
+      await tester.tap(inOctober('13'));
       expect(tapped, DateTime(2026, 10, 13));
       tapped = null;
-      await tester.tap(find.text('12'));
+      await tester.tap(inOctober('12'));
       expect(tapped, isNull);
 
-      await tester.tap(find.byTooltip('Previous month'));
-      await tester.pump();
+      // Older months follow below, back to the first one with a workout.
+      await tester.scrollUntilVisible(find.text('August 2026'), 200);
       expect(find.text('September 2026'), findsOneWidget);
-      // No earlier month has a workout, and this is the earliest.
-      final back = find.ancestor(
-        of: find.byTooltip('Previous month'),
-        matching: find.byType(IconButton),
-      );
-      expect(tester.widget<IconButton>(back).onPressed, isNull);
+      expect(find.text('No workouts'), findsOneWidget);
+      await tester.drag(find.byType(ListView), const Offset(0, -2000));
+      await tester.pump();
+      expect(find.text('July 2026'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   }
 
