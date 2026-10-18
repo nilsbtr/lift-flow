@@ -301,7 +301,7 @@ abstract final class AppTheme {
         indicatorColor: scheme.primaryContainer,
         indicatorShape: const StadiumBorder(),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         iconTheme: WidgetStateProperty.resolveWith(
           (s) => IconThemeData(
             size: IconSizes.md,
