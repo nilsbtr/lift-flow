@@ -1520,9 +1520,273 @@ i1.GeneratedColumn<String> _column_74(String aliasedName) =>
       type: i1.DriftSqlType.string,
       $customConstraints: 'NOT NULL',
     );
+
+final class Schema4 extends i0.VersionedSchema {
+  Schema4({required super.database}) : super(version: 4);
+  @override
+  late final List<i1.DatabaseSchemaEntity> entities = [
+    exercises,
+    templateFolders,
+    workoutTemplates,
+    templateExercises,
+    workouts,
+    workoutExercises,
+    workoutSets,
+    appSettings,
+    restState,
+    bodyweightEntries,
+    idxExercisesArchived,
+    idxWorkoutTemplatesFolder,
+    idxTemplateExercisesTemplate,
+    idxTemplateExercisesExercise,
+    idxWorkoutsTemplate,
+    idxWorkoutsEnded,
+    idxWorkoutsStarted,
+    idxWorkoutExercisesWorkout,
+    idxWorkoutExercisesExercise,
+    idxWorkoutSetsExercise,
+  ];
+  late final Shape9 exercises = Shape9(
+    source: i0.VersionedTable(
+      entityName: 'exercises',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [
+        _column_0,
+        _column_1,
+        _column_2,
+        _column_3,
+        _column_4,
+        _column_5,
+        _column_6,
+        _column_7,
+        _column_45,
+        _column_46,
+        _column_47,
+        _column_48,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape10 templateFolders = Shape10(
+    source: i0.VersionedTable(
+      entityName: 'template_folders',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [_column_0, _column_1, _column_8, _column_49],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape11 workoutTemplates = Shape11(
+    source: i0.VersionedTable(
+      entityName: 'workout_templates',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [_column_0, _column_1, _column_8, _column_50],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape12 templateExercises = Shape12(
+    source: i0.VersionedTable(
+      entityName: 'template_exercises',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [
+        _column_0,
+        _column_9,
+        _column_10,
+        _column_11,
+        _column_12,
+        _column_13,
+        _column_14,
+        _column_51,
+        _column_52,
+        _column_53,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape13 workouts = Shape13(
+    source: i0.VersionedTable(
+      entityName: 'workouts',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [
+        _column_0,
+        _column_15,
+        _column_1,
+        _column_16,
+        _column_17,
+        _column_18,
+        _column_19,
+        _column_20,
+        _column_21,
+        _column_54,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape14 workoutExercises = Shape14(
+    source: i0.VersionedTable(
+      entityName: 'workout_exercises',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [
+        _column_0,
+        _column_22,
+        _column_10,
+        _column_11,
+        _column_23,
+        _column_24,
+        _column_54,
+        _column_53,
+        _column_51,
+        _column_52,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape15 workoutSets = Shape15(
+    source: i0.VersionedTable(
+      entityName: 'workout_sets',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: [],
+      columns: [
+        _column_0,
+        _column_25,
+        _column_11,
+        _column_26,
+        _column_27,
+        _column_28,
+        _column_29,
+        _column_55,
+        _column_56,
+        _column_54,
+        _column_57,
+        _column_58,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape16 appSettings = Shape16(
+    source: i0.VersionedTable(
+      entityName: 'app_settings',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: ['PRIMARY KEY(id)'],
+      columns: [
+        _column_31,
+        _column_32,
+        _column_33,
+        _column_34,
+        _column_18,
+        _column_35,
+        _column_36,
+        _column_37,
+        _column_38,
+        _column_39,
+        _column_40,
+        _column_59,
+        _column_60,
+        _column_61,
+        _column_62,
+        _column_63,
+        _column_64,
+        _column_65,
+        _column_66,
+        _column_67,
+        _column_68,
+        _column_69,
+        _column_70,
+        _column_71,
+        _column_72,
+      ],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape7 restState = Shape7(
+    source: i0.VersionedTable(
+      entityName: 'rest_state',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: ['PRIMARY KEY(id)'],
+      columns: [_column_31, _column_41, _column_42],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  late final Shape8 bodyweightEntries = Shape8(
+    source: i0.VersionedTable(
+      entityName: 'bodyweight_entries',
+      withoutRowId: false,
+      isStrict: false,
+      tableConstraints: ['PRIMARY KEY(date)'],
+      columns: [_column_43, _column_44],
+      attachedDatabase: database,
+    ),
+    alias: null,
+  );
+  final i1.Index idxExercisesArchived = i1.Index(
+    'idx_exercises_archived',
+    'CREATE INDEX idx_exercises_archived ON exercises (is_archived)',
+  );
+  final i1.Index idxWorkoutTemplatesFolder = i1.Index(
+    'idx_workout_templates_folder',
+    'CREATE INDEX idx_workout_templates_folder ON workout_templates (folder_id)',
+  );
+  final i1.Index idxTemplateExercisesTemplate = i1.Index(
+    'idx_template_exercises_template',
+    'CREATE INDEX idx_template_exercises_template ON template_exercises (template_id)',
+  );
+  final i1.Index idxTemplateExercisesExercise = i1.Index(
+    'idx_template_exercises_exercise',
+    'CREATE INDEX idx_template_exercises_exercise ON template_exercises (exercise_id)',
+  );
+  final i1.Index idxWorkoutsTemplate = i1.Index(
+    'idx_workouts_template',
+    'CREATE INDEX idx_workouts_template ON workouts (template_id)',
+  );
+  final i1.Index idxWorkoutsEnded = i1.Index(
+    'idx_workouts_ended',
+    'CREATE INDEX idx_workouts_ended ON workouts (ended_at)',
+  );
+  final i1.Index idxWorkoutsStarted = i1.Index(
+    'idx_workouts_started',
+    'CREATE INDEX idx_workouts_started ON workouts (started_at)',
+  );
+  final i1.Index idxWorkoutExercisesWorkout = i1.Index(
+    'idx_workout_exercises_workout',
+    'CREATE INDEX idx_workout_exercises_workout ON workout_exercises (workout_id)',
+  );
+  final i1.Index idxWorkoutExercisesExercise = i1.Index(
+    'idx_workout_exercises_exercise',
+    'CREATE INDEX idx_workout_exercises_exercise ON workout_exercises (exercise_id)',
+  );
+  final i1.Index idxWorkoutSetsExercise = i1.Index(
+    'idx_workout_sets_exercise',
+    'CREATE INDEX idx_workout_sets_exercise ON workout_sets (workout_exercise_id)',
+  );
+}
+
 i0.MigrationStepWithVersion migrationSteps({
   required Future<void> Function(i1.Migrator m, Schema2 schema) from1To2,
   required Future<void> Function(i1.Migrator m, Schema3 schema) from2To3,
+  required Future<void> Function(i1.Migrator m, Schema4 schema) from3To4,
 }) {
   return (currentVersion, database) async {
     switch (currentVersion) {
@@ -1536,6 +1800,11 @@ i0.MigrationStepWithVersion migrationSteps({
         final migrator = i1.Migrator(database, schema);
         await from2To3(migrator, schema);
         return 3;
+      case 3:
+        final schema = Schema4(database: database);
+        final migrator = i1.Migrator(database, schema);
+        await from3To4(migrator, schema);
+        return 4;
       default:
         throw ArgumentError.value('Unknown migration from $currentVersion');
     }
@@ -1545,6 +1814,11 @@ i0.MigrationStepWithVersion migrationSteps({
 i1.OnUpgrade stepByStep({
   required Future<void> Function(i1.Migrator m, Schema2 schema) from1To2,
   required Future<void> Function(i1.Migrator m, Schema3 schema) from2To3,
+  required Future<void> Function(i1.Migrator m, Schema4 schema) from3To4,
 }) => i0.VersionedSchema.stepByStepHelper(
-  step: migrationSteps(from1To2: from1To2, from2To3: from2To3),
+  step: migrationSteps(
+    from1To2: from1To2,
+    from2To3: from2To3,
+    from3To4: from3To4,
+  ),
 );

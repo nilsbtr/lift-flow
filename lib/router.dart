@@ -11,9 +11,6 @@ import 'features/history/history_screen.dart';
 import 'features/history/log_workout_route.dart';
 import 'features/history/workout_detail_screen.dart';
 import 'features/home/home_screen.dart';
-import 'features/photos/photo_compare_screen.dart';
-import 'features/photos/photo_viewer_screen.dart';
-import 'features/photos/photos_screen.dart';
 import 'features/progress/progress_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/workout/workout_screen.dart';
@@ -91,11 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/progress',
                 builder: (_, _) => const ReadableWidth(child: ProgressScreen()),
-                routes: [
-                  _exerciseRoute(),
-                  _workoutRoute('workout/:workoutId'),
-                  _photosRoute(),
-                ],
+                routes: [_exerciseRoute(), _workoutRoute('workout/:workoutId')],
               ),
             ],
           ),
@@ -212,30 +205,6 @@ GoRoute _workoutRoute(String path, {int level = 0}) => GoRoute(
       ),
     ),
     _exerciseRoute(level: level),
-  ],
-);
-
-/// Progress photos: the grid, a side-by-side comparison (`?a=` and `?b=` are
-/// photo ids to start with) and a full-screen viewer that pops back. The
-/// viewer is the one route that uses the whole window.
-GoRoute _photosRoute() => GoRoute(
-  path: 'photos',
-  builder: (_, _) => const ReadableWidth(child: PhotosScreen()),
-  routes: [
-    GoRoute(
-      path: 'compare',
-      builder: (_, s) => ReadableWidth(
-        child: PhotoCompareScreen(
-          a: int.tryParse(s.uri.queryParameters['a'] ?? ''),
-          b: int.tryParse(s.uri.queryParameters['b'] ?? ''),
-        ),
-      ),
-    ),
-    GoRoute(
-      path: ':photoId',
-      parentNavigatorKey: rootNavigatorKey,
-      builder: (_, s) => PhotoViewerScreen(photoId: _param(s, 'photoId')),
-    ),
   ],
 );
 

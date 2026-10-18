@@ -253,16 +253,6 @@ class BodyweightEntries extends Table {
   Set<Column<Object>> get primaryKey => {date};
 }
 
-@DataClassName('ProgressPhoto')
-class ProgressPhotos extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  DateTimeColumn get takenAt => dateTime()();
-
-  /// File name relative to the app's photo directory.
-  TextColumn get fileName => text()();
-  TextColumn get note => text().nullable()();
-}
-
 @DataClassName('RestStateRow')
 class RestState extends Table {
   IntColumn get id => integer().withDefault(const Constant(1))();
@@ -285,7 +275,6 @@ class RestState extends Table {
     AppSettings,
     RestState,
     BodyweightEntries,
-    ProgressPhotos,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -299,7 +288,7 @@ class AppDatabase extends _$AppDatabase {
   );
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -409,6 +398,10 @@ class AppDatabase extends _$AppDatabase {
             ],
           );
         }
+      },
+      // Progress photos were removed.
+      from3To4: (m, schema) async {
+        await m.deleteTable('progress_photos');
       },
     ),
     beforeOpen: (details) async {

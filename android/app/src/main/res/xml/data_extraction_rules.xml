@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12 and up. Progress photos stay out of cloud backup: they are
-     private, and they would use up its 25 MB limit, which stops the database
-     from being backed up too. A device-to-device transfer takes them along. -->
-<data-extraction-rules>
-    <cloud-backup>
-        <exclude domain="file" path="photos/" />
-    </cloud-backup>
-</data-extraction-rules>

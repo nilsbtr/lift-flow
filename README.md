@@ -14,22 +14,20 @@ A fully local, minimal gym tracker built with Flutter. No accounts, no network, 
 - **Tablets and landscape**: from 600 dp wide the tabs move to a side rail, and from 840 dp History and the exercise list show the selected workout or exercise beside the list. Other screens keep a readable column width.
 - **History & records**: workouts grouped by month, with search, template and exercise filters, and a month calendar; log a past workout, edit its date and times, or do it again. Home shows a tappable weekly strip (weeks start on Monday, Sunday, or Saturday), the last workout, and this week’s volume against the same point last week. Per-exercise history and PRs (heaviest, best e1RM, best load, most reps, longest time, longest distance, best pace).
 - **Progress**: consistency calendar, weekly training (3M to All), muscle balance with a configurable weekly-sets band, top lifts, recent records, lifetime totals with a year in review, and body weight with a 7-day average. Weigh-ins can be backdated, edited, and undone after a delete.
-- **Progress photos**: add photos from the camera or gallery, browse them by month, edit the date and note, and compare any two side by side. They are kept in the app’s private storage (downscaled to 1600 px), never in the gallery.
 - **Settings**: kg/lb, body weight, light/dark/system theme, pure-black mode, Material You colors (Android 12+), rest defaults, set effort (RPE or RIR), bar weight and available plates, keep screen on, and JSON backup export/import with the date of the last backup.
 - **Reminders**: optional weekly notifications on the training days and time you pick, scheduled on the phone.
 - **CSV export**: every completed set as one row, for spreadsheets.
 
 ## Tech stack
 
-| Concern       | Package                                                                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| UI            | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                                                            |
-| State         | `flutter_riverpod` 3                                                                                                                            |
-| Routing       | `go_router` (`StatefulShellRoute` with 5 tabs)                                                                                                  |
-| Persistence   | `drift` + `drift_flutter` (SQLite, WAL)                                                                                                         |
-| Photo archive | `archive` (zip)                                                                                                                                 |
-| Icons         | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                                                   |
-| Platform      | `flutter_local_notifications`, `flutter_timezone`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions`, `home_widget`, `image_picker` |
+| Concern     | Package                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| UI          | `material_ui` (Material 3), custom theme and tokens, `dynamic_color`                                                            |
+| State       | `flutter_riverpod` 3                                                                                                            |
+| Routing     | `go_router` (`StatefulShellRoute` with 5 tabs)                                                                                  |
+| Persistence | `drift` + `drift_flutter` (SQLite, WAL)                                                                                         |
+| Icons       | Streamline Flex SVGs compiled with `vector_graphics_compiler`                                                                   |
+| Platform    | `flutter_local_notifications`, `flutter_timezone`, `wakelock_plus`, `file_picker`, `local_auth`, `quick_actions`, `home_widget` |
 
 ## Getting started
 
@@ -58,10 +56,10 @@ lib/
   app.dart         MaterialApp, theme mode, wakelock, background notifications
   router.dart      routes, navigation shell (bottom bar or rail), list-detail panes, live workout bar
   providers.dart   Riverpod providers (repositories, streams, settings, rest timer)
-  data/            drift schema, enums, repositories, backup service, photo storage
+  data/            drift schema, enums, repositories, backup service
   domain/          pure logic: unit conversion/formatting, PR/e1RM calculation, stats, plate math, warm-ups, supersets, the widget’s next template
-  features/        screens by tab: home, history, gym, workout, settings, plus photos and the lock screen
-  services/        local notifications, device authentication, launcher shortcuts, home-screen widget, photo picker
+  features/        screens by tab: home, history, gym, workout, settings, plus the lock screen
+  services/        local notifications, device authentication, launcher shortcuts, home-screen widget
   theme/           colors, text theme, spacing/radius/motion tokens, icons
   widgets/         shared widgets (sheets, dialogs, cards, PeriodicBuilder, adaptive layout)
 assets/
@@ -80,7 +78,6 @@ test/               unit, in-memory DB, chart, and schema migration tests
 - Home suggests a backup after every 10 finished workouts, and Settings shows the date of the last one. Importing a backup counts as backed up from the day the file was made.
 - Import and “Delete all data” are refused while a workout is running.
 - The CSV export is for spreadsheets and can’t be imported. Weights are listed in kg and in your unit.
-- Progress photos are files in the app’s private folder, outside the JSON backup. Export or import them as a separate zip in Settings; importing adds to your photos and skips ones you already have. “Delete all data” removes them, and importing a JSON backup keeps them. Android’s cloud backup leaves them out.
 
 ## Contributing
 

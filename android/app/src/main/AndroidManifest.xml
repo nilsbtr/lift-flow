@@ -9,9 +9,7 @@
     <application
         android:label="Lift Flow"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -84,11 +82,6 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
-        </intent>
-        <!-- image_picker hands the camera app write access to the photo, which
-             it can only do for an app it can see (Android 11+). -->
-        <intent>
-            <action android:name="android.media.action.IMAGE_CAPTURE"/>
         </intent>
     </queries>
 </manifest>
