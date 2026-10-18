@@ -1655,20 +1655,10 @@ void main() {
           permissionsPrompted: const Value(true),
         ),
       );
-      await db
-          .into(db.progressPhotos)
-          .insert(
-            ProgressPhotosCompanion.insert(
-              takenAt: DateTime(2025, 4, 1),
-              fileName: 'a.jpg',
-            ),
-          );
-
       final backup = BackupService(db);
       final bytes = await backup.export();
       final json = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
       expect(json['version'], 4);
-      expect(json.containsKey('progressPhotos'), isFalse);
       final exported = json['settings']! as Map<String, Object?>;
       for (final k in [
         'lastBackupAt',
@@ -1731,12 +1721,6 @@ void main() {
         30,
         12.5,
       ));
-
-      // Photos live outside the backup: delete and import leave them alone.
-      expect(
-        (await db.select(db.progressPhotos).getSingle()).fileName,
-        'a.jpg',
-      );
     });
 
     test('import keeps this device’s app lock, delete-all resets it', () async {

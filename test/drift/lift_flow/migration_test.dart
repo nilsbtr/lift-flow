@@ -10,6 +10,7 @@ import 'generated/schema.dart';
 import 'generated/schema_v1.dart' as v1;
 import 'generated/schema_v2.dart' as v2;
 import 'generated/schema_v3.dart' as v3;
+import 'generated/schema_v4.dart' as v4;
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -276,6 +277,56 @@ void main() {
         ));
         expect((s.reminderDays, s.reminderMinutes, s.appLock), (0, 1080, 0));
         expect((s.barWeightKg, s.plates, s.lastBackupAt), (null, null, null));
+      },
+    );
+  });
+
+  test('v3 to v4 drops progress photos and keeps the rest', () async {
+    final at = DateTime(2025, 1, 1, 18).millisecondsSinceEpoch ~/ 1000;
+    await verifier.testWithDataIntegrity(
+      oldVersion: 3,
+      newVersion: 4,
+      createOld: v3.DatabaseAtV3.new,
+      createNew: v4.DatabaseAtV4.new,
+      openTestedDatabase: AppDatabase.new,
+      createItems: (batch, oldDb) {
+        batch.insert(
+          oldDb.exercises,
+          v3.ExercisesData(
+            id: 1,
+            name: 'Squat',
+            muscleGroup: 'quads',
+            trackingType: 'weights',
+            loadMode: 'none',
+            isArchived: 0,
+            createdAt: at,
+            equipment: 'barbell',
+            perSide: 0,
+            perDumbbell: 0,
+            secondaryMuscles: '',
+          ),
+        );
+        batch.insert(
+          oldDb.bodyweightEntries,
+          v3.BodyweightEntriesData(date: at, kg: 80),
+        );
+        batch.insert(
+          oldDb.progressPhotos,
+          v3.ProgressPhotosData(id: 1, takenAt: at, fileName: 'a.jpg'),
+        );
+      },
+      validateItems: (newDb) async {
+        final e = await newDb.select(newDb.exercises).getSingle();
+        expect((e.name, e.equipment), ('Squat', 'barbell'));
+        expect(await newDb.select(newDb.bodyweightEntries).get(), [
+          v4.BodyweightEntriesData(date: at, kg: 80),
+        ]);
+        final tables = await newDb
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE name = 'progress_photos'",
+            )
+            .get();
+        expect(tables, isEmpty);
       },
     );
   });

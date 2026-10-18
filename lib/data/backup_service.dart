@@ -27,8 +27,7 @@ class BackupBlockedException implements Exception {
 }
 
 /// JSON export / import of all data. Import replaces everything in a single
-/// transaction after strict validation. Progress photos are files on the
-/// device and stay out of both.
+/// transaction after strict validation.
 class BackupService {
   BackupService(this._db);
   final AppDatabase _db;

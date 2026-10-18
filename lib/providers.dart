@@ -10,9 +10,6 @@ import 'data/backup_service.dart';
 import 'data/bodyweight_repository.dart';
 import 'data/database.dart';
 import 'data/exercise_repository.dart';
-import 'data/photo_repository.dart';
-import 'data/photo_service.dart';
-import 'data/photo_storage.dart';
 import 'data/settings_repository.dart';
 import 'data/template_repository.dart';
 import 'data/workout_repository.dart';
@@ -25,7 +22,6 @@ import 'domain/stats.dart';
 import 'services/app_lock.dart';
 import 'services/home_widget.dart';
 import 'services/notifications.dart';
-import 'services/photo_picker.dart';
 import 'services/shortcuts.dart';
 import 'theme/dynamic_colors.dart';
 
@@ -90,19 +86,6 @@ final backupProvider = Provider(
 final bodyweightRepoProvider = Provider(
   (ref) => BodyweightRepository(ref.watch(databaseProvider)),
 );
-final photoRepoProvider = Provider(
-  (ref) => PhotoRepository(ref.watch(databaseProvider)),
-);
-
-/// Looks up the photo folder on first use. Tests override it with a temp one.
-final photoStorageProvider = Provider((ref) => PhotoStorage.appPrivate());
-final photoServiceProvider = Provider(
-  (ref) => PhotoService(
-    ref.watch(photoRepoProvider),
-    ref.watch(photoStorageProvider),
-  ),
-);
-final photoPickerProvider = Provider((ref) => const PhotoPicker());
 
 // ------------------------------------------------------------ settings
 
@@ -335,11 +318,6 @@ final bodyweightEntriesProvider =
     StreamProvider.autoDispose<List<BodyweightEntry>>(
       (ref) => ref.watch(bodyweightRepoProvider).watchAll(),
     );
-
-/// Progress photos, newest first.
-final photosProvider = StreamProvider<List<ProgressPhoto>>(
-  (ref) => ref.watch(photoRepoProvider).watchAll(),
-);
 
 final workoutDetailProvider = StreamProvider.autoDispose
     .family<LoadedWorkout?, int>(

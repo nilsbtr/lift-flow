@@ -21,7 +21,6 @@ import '../../widgets/charts/trend_chart.dart';
 import '../../widgets/charts/week_bar_chart.dart';
 import '../../widgets/common.dart';
 import '../history/workout_day_sheet.dart';
-import '../photos/photos_card.dart';
 import 'progress_providers.dart';
 
 final _day = DateFormat('EEE, d MMM y');
@@ -39,16 +38,10 @@ class ProgressScreen extends ConsumerWidget {
     if (history.isEmpty && (weights?.isEmpty ?? true)) {
       return Scaffold(
         appBar: AppBar(title: const Text('Progress')),
-        body: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-          children: const [
-            PhotosCard(),
-            EmptyState(
-              icon: AppIcons.progress,
-              title: 'No progress yet',
-              message: 'Finish a workout to see your trends here.',
-            ),
-          ],
+        body: const EmptyState(
+          icon: AppIcons.progress,
+          title: 'No progress yet',
+          message: 'Finish a workout to see your trends here.',
         ),
       );
     }
@@ -69,8 +62,6 @@ class ProgressScreen extends ConsumerWidget {
             const _RecordsCard(),
             _LifetimeCard(history),
           ],
-          const PhotosCard(),
-          gap,
           _BodyweightCard(weights ?? const []),
         ],
       ),

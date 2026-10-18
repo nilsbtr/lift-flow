@@ -53,8 +53,6 @@ abstract final class AppIcons {
   static const lock = AppIconData('lock');
   static const exportFile = AppIconData('export_file');
   static const importFile = AppIconData('import_file');
-  static const camera = AppIconData('camera');
-  static const gallery = AppIconData('gallery');
   static const openExternal = AppIconData('open_external');
   static const addExercise = AppIconData('add_exercise');
 
