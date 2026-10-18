@@ -6,6 +6,7 @@ Lift Flow is a local-only Flutter gym tracker (Android first). See [README.md](R
 
 - Codegen after editing `lib/data/database.dart`: `dart run build_runner build` (build_runner 2.16 no longer has `--delete-conflicting-outputs`).
 - Validate every change with `flutter analyze` and `flutter test`. Run `flutter build bundle` too: it catches kernel compile errors that analyze/test miss.
+- CI (`.github/workflows/ci.yml`) runs analyze, test and `flutter build bundle` on pull requests with a pinned Flutter version; bump it there and in `release.yml` together. `release.yml` publishes a signed testing APK as a pre-release for every push to `main`; its signing key comes from the `ANDROID_*` secrets through `android/key.properties` (see README).
 - Android package id: `com.nilsbtr.liftflow`. Clear app data with `adb shell pm clear com.nilsbtr.liftflow`. Read startup errors with `adb logcat -d -s flutter:*`.
 
 ## Conventions

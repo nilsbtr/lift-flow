@@ -1,0 +1,107 @@
+name: Release
+
+# Every push to main that passes CI becomes a signed testing APK, published
+# as a GitHub pre-release named after the run number.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  apk:
+    name: Build and publish APK
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+          cache: true
+
+      # Every build must be signed with the same key, or Android refuses to
+      # install it over the previous one.
+      - name: Set up signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error title=No signing key::Add the ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD repository secrets (see README)."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          cat > android/key.properties <<PROPS
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=${KEY_PASSWORD:-$STORE_PASSWORD}
+          PROPS
+
+      - run: flutter pub get
+
+      # The run number is the version code, so each build installs over the last.
+      - name: Build APK
+        run: |
+          flutter build apk --release --build-number="$BUILD"
+          version=$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "APK=lift-flow-$version-build.$BUILD.apk" >> "$GITHUB_ENV"
+
+      - name: Check signature
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk "$APK"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+          "$apksigner" verify --print-certs "$APK" | tee cert.txt
+          if grep -q 'CN=Android Debug' cert.txt; then
+            echo "::error::The APK is signed with a debug key."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK }}
+          path: ${{ env.APK }}
+          if-no-files-found: error
+
+      # A re-run of the same build replaces the file on its release.
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="build-$BUILD"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "$APK" --clobber
+          else
+            gh release create "$tag" "$APK" \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Testing build $BUILD ($VERSION)" \
+              --generate-notes
+          fi
+          echo "Published [$APK]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag)" >> "$GITHUB_STEP_SUMMARY"
