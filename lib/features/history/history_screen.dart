@@ -133,16 +133,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ),
       );
     } else if (_calendar) {
-      body = SingleChildScrollView(
-        child: MonthCalendar(
-          workouts: list,
-          firstDay: firstDay,
-          onTapDay: (day) => showWorkoutDaySheet(
-            context,
-            day: day,
-            history: list,
-            workoutPath: (id) => '/history/$id',
-          ),
+      body = MonthCalendar(
+        workouts: list,
+        firstDay: firstDay,
+        onTapDay: (day) => showWorkoutDaySheet(
+          context,
+          day: day,
+          history: list,
+          workoutPath: (id) => '/history/$id',
         ),
       );
     } else if (list.isEmpty) {

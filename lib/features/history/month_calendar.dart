@@ -3,13 +3,13 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/database.dart';
 import '../../domain/stats.dart';
-import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
 
-/// One month at a time with trained days marked. Weeks start on [firstDay].
-/// Taps on trained days call [onTapDay].
-class MonthCalendar extends StatefulWidget {
+/// Every month from the current one back to the first with a workout, newest
+/// first, in one scroll view. Trained days are marked and weeks start on
+/// [firstDay]. Taps on trained days call [onTapDay].
+class MonthCalendar extends StatelessWidget {
   const MonthCalendar({
     super.key,
     required this.workouts,
@@ -26,139 +26,119 @@ class MonthCalendar extends StatefulWidget {
   final DateTime? now;
 
   @override
-  State<MonthCalendar> createState() => _MonthCalendarState();
+  Widget build(BuildContext context) {
+    final now = this.now ?? DateTime.now();
+    final count = <DateTime, int>{};
+    var first = DateTime(now.year, now.month);
+    for (final w in workouts) {
+      final d = dayOf(w.startedAt);
+      count[d] = (count[d] ?? 0) + 1;
+      if (d.isBefore(first)) first = DateTime(d.year, d.month);
+    }
+    final months = (now.year - first.year) * 12 + now.month - first.month + 1;
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: Space.xxl),
+      itemCount: months,
+      itemBuilder: (_, i) => _Month(
+        month: DateTime(now.year, now.month - i),
+        count: count,
+        firstDay: firstDay,
+        today: dayOf(now),
+        onTapDay: onTapDay,
+      ),
+    );
+  }
 }
 
-class _MonthCalendarState extends State<MonthCalendar> {
-  late DateTime _month = DateTime(_now.year, _now.month);
-
-  DateTime get _now => widget.now ?? DateTime.now();
-
-  /// First month with a workout, so paging back stops there.
-  DateTime get _earliest {
-    var first = _month;
-    for (final w in widget.workouts) {
-      if (w.startedAt.isBefore(first)) first = w.startedAt;
-    }
-    return DateTime(first.year, first.month);
-  }
-
-  void _page(int by) => setState(() {
-    final m = DateTime(_month.year, _month.month + by);
-    if (!m.isBefore(_earliest) && !m.isAfter(DateTime(_now.year, _now.month))) {
-      _month = m;
-    }
+class _Month extends StatelessWidget {
+  const _Month({
+    required this.month,
+    required this.count,
+    required this.firstDay,
+    required this.today,
+    required this.onTapDay,
   });
+
+  final DateTime month;
+
+  /// Workouts per day, across all months.
+  final Map<DateTime, int> count;
+  final int firstDay;
+  final DateTime today;
+  final ValueChanged<DateTime> onTapDay;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final lift = LiftColors.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final today = dayOf(_now);
 
-    final days = DateUtils.getDaysInMonth(_month.year, _month.month);
-    final lead = (_month.weekday - widget.firstDay) % 7;
+    final days = DateUtils.getDaysInMonth(month.year, month.month);
+    final lead = (month.weekday - firstDay) % 7;
     final rows = (lead + days + 6) ~/ 7;
-    final count = <DateTime, int>{};
     var total = 0;
-    for (final w in widget.workouts) {
-      final d = dayOf(w.startedAt);
-      if (d.year == _month.year && d.month == _month.month) {
-        count[d] = (count[d] ?? 0) + 1;
-        total++;
-      }
+    for (var d = 1; d <= days; d++) {
+      total += count[DateTime(month.year, month.month, d)] ?? 0;
     }
-    final canBack = _month.isAfter(_earliest);
-    final canForward = _month.isBefore(DateTime(_now.year, _now.month));
-    final label = DateFormat('MMMM y').format(_month);
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v.abs() > 200) _page(v > 0 ? -1 : 1);
-      },
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          Space.lg,
-          Space.sm,
-          Space.lg,
-          Space.xxl,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        Space.lg,
+        Space.sm,
+        Space.lg,
+        Space.lg,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: Space.sm),
+            child: Column(
               children: [
-                IconButton(
-                  tooltip: 'Previous month',
-                  onPressed: canBack ? () => _page(-1) : null,
-                  icon: const AppIcon(AppIcons.arrowLeft),
+                Text(DateFormat('MMMM y').format(month), style: t.titleMedium),
+                Text(
+                  total == 0
+                      ? 'No workouts'
+                      : '$total ${total == 1 ? 'workout' : 'workouts'}',
+                  style: t.bodySmall?.copyWith(color: lift.muted),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Space.sm),
+          Row(
+            children: [
+              for (var i = 0; i < 7; i++)
                 Expanded(
-                  child: Column(
-                    children: [
-                      Text(label, style: t.titleMedium),
-                      Text(
-                        total == 0
-                            ? 'No workouts'
-                            : '$total ${total == 1 ? 'workout' : 'workouts'}',
-                        style: t.bodySmall?.copyWith(color: lift.muted),
-                      ),
-                    ],
+                  child: Center(
+                    child: Text(
+                      // By weekday, Monday first.
+                      const [
+                        'M',
+                        'T',
+                        'W',
+                        'T',
+                        'F',
+                        'S',
+                        'S',
+                      ][(firstDay - 1 + i) % 7],
+                      style: t.labelSmall?.copyWith(color: lift.muted),
+                    ),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Next month',
-                  onPressed: canForward ? () => _page(1) : null,
-                  icon: const AppIcon(AppIcons.chevronRight),
-                ),
-              ],
-            ),
-            const SizedBox(height: Space.sm),
+            ],
+          ),
+          const SizedBox(height: Space.xs),
+          for (var r = 0; r < rows; r++)
             Row(
               children: [
-                for (var i = 0; i < 7; i++)
+                for (var c = 0; c < 7; c++)
                   Expanded(
-                    child: Center(
-                      child: Text(
-                        // By weekday, Monday first.
-                        const [
-                          'M',
-                          'T',
-                          'W',
-                          'T',
-                          'F',
-                          'S',
-                          'S',
-                        ][(widget.firstDay - 1 + i) % 7],
-                        style: t.labelSmall?.copyWith(color: lift.muted),
-                      ),
-                    ),
+                    child: _cell(r * 7 + c - lead + 1, days, t, lift, scheme),
                   ),
               ],
             ),
-            const SizedBox(height: Space.xs),
-            for (var r = 0; r < rows; r++)
-              Row(
-                children: [
-                  for (var c = 0; c < 7; c++)
-                    Expanded(
-                      child: _cell(
-                        r * 7 + c - lead + 1,
-                        days,
-                        count,
-                        today,
-                        t,
-                        lift,
-                        scheme,
-                      ),
-                    ),
-                ],
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -166,8 +146,6 @@ class _MonthCalendarState extends State<MonthCalendar> {
   Widget _cell(
     int dayNumber,
     int daysInMonth,
-    Map<DateTime, int> count,
-    DateTime today,
     TextTheme t,
     LiftColors lift,
     ColorScheme scheme,
@@ -175,7 +153,7 @@ class _MonthCalendarState extends State<MonthCalendar> {
     if (dayNumber < 1 || dayNumber > daysInMonth) {
       return const SizedBox(height: kMinTap);
     }
-    final day = DateTime(_month.year, _month.month, dayNumber);
+    final day = DateTime(month.year, month.month, dayNumber);
     final n = count[day] ?? 0;
     final trained = n > 0;
     final isToday = day == today;
@@ -187,7 +165,7 @@ class _MonthCalendarState extends State<MonthCalendar> {
           '${trained ? ', $n ${n == 1 ? 'workout' : 'workouts'}' : ''}',
       child: InkWell(
         customBorder: const CircleBorder(),
-        onTap: trained ? () => widget.onTapDay(day) : null,
+        onTap: trained ? () => onTapDay(day) : null,
         child: SizedBox(
           height: kMinTap,
           child: Center(
