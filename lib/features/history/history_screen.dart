@@ -85,8 +85,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   Future<void> _pickExercise() async {
-    final active = ref.read(exercisesProvider).value ?? const <Exercise>[];
-    final archived = await ref.read(archivedExercisesProvider.future);
+    // Straight from the repository: nothing may be listening to the providers
+    // yet, and an unlistened autoDispose one is gone before it loads.
+    final repo = ref.read(exerciseRepoProvider);
+    final (active, archived) = await (
+      repo.watchActive().first,
+      repo.watchArchived().first,
+    ).wait;
     if (!mounted) return;
     final picked = await showAppSheet<Exercise>(
       context,
